@@ -1,0 +1,6 @@
+﻿{
+  "apiKey": "在此填入 DeepSeek API Key",
+  "baseUrl": "https://api.deepseek.com",
+  "model": "deepseek-v4-flash",
+  "autoSearch": true
+}

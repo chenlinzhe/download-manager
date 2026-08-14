@@ -1,0 +1,21 @@
+{
+  "name": "download-package-manager",
+  "version": "1.0.0",
+  "description": "本机下载包扫描与整理工具",
+  "main": "desktop-main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^37.2.3",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "local.penguin.downloadmanager",
+    "productName": "下载包管家",
+    "files": ["desktop-main.cjs", "preload.cjs", "index.html", "app.js"],
+    "win": {"target": "portable"},
+    "portable": {"artifactName": "下载包管家.exe"}
+  }
+}
