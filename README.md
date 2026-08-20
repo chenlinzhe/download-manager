@@ -2,7 +2,7 @@
 
 > **你的下载目录，AI 帮你管。** 一款运行在本机的下载包智能整理工具——自动扫描、AI 识别、风险预警、一键整理，再也不用面对几 TB 的"下载"文件夹发愁。
 
-当前版本：**智能搜索版 v10** ｜ 绿色免安装 ｜ Windows 10/11
+当前版本：**智能搜索版 v11** ｜ 绿色免安装 ｜ Windows 10/11
 
 ---
 
@@ -37,7 +37,7 @@
 
 ### 直接使用（推荐，无需装 Python）
 
-👉 **[⬇️ 下载 DownloadPackageManager-v10.exe](https://github.com/chenlinzhe/download-manager/releases/latest)**
+👉 **[⬇️ 下载 DownloadPackageManager-v11.exe](https://github.com/chenlinzhe/download-manager/releases/latest)**
 
 下载后**双击运行**即可。首次使用在【软件设置】中填入你的 DeepSeek API Key（可自选模型，默认 `deepseek-v4-flash`）。
 

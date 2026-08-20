@@ -51,7 +51,7 @@ def fatal(text):
 if __name__=='__main__':
  try:
   url=resource('index.html').as_uri()
-  webview.create_window('下载包管家',url,js_api=Api(),width=1500,height=900,min_size=(900,600))
+  webview.create_window('下载包管家 v11',url,js_api=Api(),width=1500,height=900,min_size=(900,600))
   webview.start(debug=False)
  except Exception:
   fatal(traceback.format_exc())

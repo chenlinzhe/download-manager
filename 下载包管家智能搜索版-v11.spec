@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='下载包管家智能搜索版-v10',
+    name='下载包管家智能搜索版-v11',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
