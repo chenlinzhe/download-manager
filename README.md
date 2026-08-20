@@ -59,12 +59,13 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 ## 📸 界面预览
 
-> （截图占位——待补充）
->
-> - 主界面：扫描结果 + AI 说明 + 价值评分
-> - 智能搜索：自然语言提问结果
-> - 软件设置：API Key 配置
-> - 风险提示：破解/注册机预警
+| 主界面：扫描结果 + AI 说明 + 价值评分 | 智能搜索：自然语言直接找到下载包 |
+| --- | --- |
+| ![主界面](screenshots/main.png) | ![智能搜索](screenshots/search.png) |
+
+| 软件设置：DeepSeek API Key 与模型配置 | AI / LLM 说明：用途、价值与风险提示 |
+| --- | --- |
+| ![软件设置](screenshots/ai.png) | ![AI 说明](screenshots/llm.png) |
 
 ---
 
