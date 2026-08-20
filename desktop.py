@@ -31,7 +31,7 @@ class Api:
   try: return server.enrich_items(paths)
   except Exception as e: return {'ok':False,'error':str(e)}
  def scan(self, force=False):
-  try: return server.scan()
+  try: return server.scan(force)
   except Exception as e: return {'error':str(e)}
  def keep(self, paths):
   try: return {'ok':True,'result':server.save_keep(paths)}
@@ -51,7 +51,7 @@ def fatal(text):
 if __name__=='__main__':
  try:
   url=resource('index.html').as_uri()
-  webview.create_window('下载包管家 智能搜索版 v10',url,js_api=Api(),width=1500,height=900,min_size=(900,600))
+  webview.create_window('下载包管家',url,js_api=Api(),width=1500,height=900,min_size=(900,600))
   webview.start(debug=False)
  except Exception:
   fatal(traceback.format_exc())

@@ -8,7 +8,7 @@ if getattr(__import__('sys'),'frozen',False):
  APP=Path(os.environ.get('LOCALAPPDATA',Path.home()))/'DownloadPackageManager'
  APP.mkdir(parents=True,exist_ok=True)
 LABELS_FILE=APP/'user_labels.json'
-SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'
+SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; SCAN_TTL_DAYS=7
 NAMES={'down','download','downloads','downloda'}
 def download_dir(name):
  low=name.lower()
@@ -293,7 +293,16 @@ def save_keep(paths):
  tmp.write_text(json.dumps(labels,ensure_ascii=False,indent=2),encoding='utf-8'); os.replace(tmp,LABELS_FILE)
  return [v['path'] for v in labels.values() if v.get('label')=='keep']
 
-def scan():
+def scan(force=False):
+ if not force:
+  snap=load_json_file(SNAPSHOT_FILE,None)
+  if isinstance(snap,dict) and isinstance(snap.get('items'),list) and snap.get('generatedAt'):
+   try: age=(datetime.now()-datetime.fromisoformat(snap['generatedAt'])).total_seconds()
+   except (ValueError,TypeError): age=-1
+   if 0<=age<SCAN_TTL_DAYS*86400:
+    data={'generatedAt':snap['generatedAt'],'items':snap['items'],'roots':snap.get('roots',[]),'errors':snap.get('errors',[])}
+    with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
+    return data
  rr=roots(); out=[]; errors=[]; labels=load_labels(); ai_cache=load_json_file(AI_CACHE_FILE,{}); old_inventory=load_json_file(INVENTORY_FILE,[]); baseline=not INVENTORY_FILE.exists()
  def add_item(p,root,collection=None,collection_reason='',media_kind=''):
   try:
@@ -334,6 +343,7 @@ def scan():
    else: add_item(p,root)
  save_json_file(INVENTORY_FILE,[item_fingerprint(x) for x in out])
  data={'generatedAt':datetime.now().isoformat(timespec='seconds'),'items':out,'roots':[str(x) for x in rr],'errors':errors}
+ save_json_file(SNAPSHOT_FILE,data)
  with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
  return data
 
@@ -389,7 +399,7 @@ class H(SimpleHTTPRequestHandler):
     with LOCK: fresh=CACHE and time.time()-CACHE.get('at',0)<300
     if fresh and not force:
      with LOCK: return self.sendj({k:v for k,v in CACHE.items() if k!='at'})
-    return self.sendj(scan())
+    return self.sendj(scan(force))
    except Exception as e: return self.sendj({'error':str(e)},500)
   return super().do_GET()
  def do_POST(self):

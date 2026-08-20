@@ -29,7 +29,7 @@
 - 仓库不含任何敏感配置，`settings.json` 已被 git 忽略
 
 ### 🎯 专为"下载强迫症"设计
-自动扫描各盘根目录下名称含 `down` / `下载` 的文件夹，每个一级项目就是一个下载包；也支持**手工添加任意扫描目录**，永久参与扫描。
+每周自动扫描一次（扫描结果缓存复用，不会每次打开都全盘扫；随时可手动“重新扫描”刷新）。自动扫描各盘根目录下名称含 `down` / `下载` 的文件夹，每个一级项目就是一个下载包；也支持**手工添加任意扫描目录**，永久参与扫描。
 
 ---
 
@@ -70,7 +70,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 ## 🗂️ 本地数据
 
-配置与持久数据保存在 `%LOCALAPPDATA%\DownloadPackageManager`：`settings.json`、`ai_descriptions.json`、`inventory.json`、`user_labels.json`。请妥善保护包含 API Key 的 `settings.json`。
+配置与持久数据保存在 `%LOCALAPPDATA%\DownloadPackageManager`：`settings.json`、`ai_descriptions.json`、`inventory.json`、`inventory_snapshot.json`（扫描快照缓存）、`user_labels.json`。请妥善保护包含 API Key 的 `settings.json`。
 
 > 本仓库仅含干净源码：构建产物 `build*/dist*/node_modules` 不提交，EXE 通过 **GitHub Releases** 发布；旧浏览器/服务端入口（`server.py`）保留用于兼容，桌面版入口为 `desktop.py`。
 
