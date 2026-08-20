@@ -4,9 +4,16 @@
 
 应用使用 pywebview（Windows WebView2）显示桌面窗口，直接调用本机 Python，不启动 HTTP 服务、不占用网络端口。
 
-## 运行方式
+## 直接使用（推荐）
 
-### 方式一：直接运行源码（开发/自用）
+不需要安装 Python，直接下载绿色版 EXE，双击运行：
+
+👉 **[下载 DownloadPackageManager-v10.exe](https://github.com/chenlinzhe/download-manager/releases/latest)**
+
+- Windows 10/11 自带 WebView2，无需额外环境
+- 首次使用请在【软件设置】中填入 DeepSeek API Key
+
+## 从源码运行（开发/自用）
 
 ```bash
 # 1. 安装依赖（仅需 pywebview）
@@ -18,23 +25,14 @@ python desktop.py
 
 或双击 `启动下载包管家桌面版.bat`。
 
-### 方式二：打包成 EXE（桌面端 APP，推荐给用户）
+## 自己打包 EXE
 
 ```bash
 # 一键打包（自动安装依赖并执行 PyInstaller）
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
-产物在 `dist/下载包管家智能搜索版-v10.exe`，绿色免安装，可直接发给用户双击运行；也可以发布到 GitHub Releases 供下载。
-
-### 方式三：Electron 打包（备用桌面方案）
-
-本仓库同时保留了 Electron 桌面壳（`desktop-main.cjs` / `preload.cjs`）：
-
-```bash
-npm install
-npm run dist   # 生成 portable 版 EXE（electron-builder）
-```
+产物在 `dist/`，绿色免安装，可直接发布到 GitHub Releases。
 
 ## 功能
 
@@ -51,4 +49,4 @@ npm run dist   # 生成 portable 版 EXE（electron-builder）
 
 其中包括 settings.json、ai_descriptions.json、inventory.json 和 user_labels.json。请妥善保护包含 API Key 的 settings.json。
 
-> 本仓库仅含干净源码：`settings.json`（含 API Key）已被 `.gitignore` 排除，构建产物 `build*/dist*/node_modules` 不提交；旧浏览器/服务端入口（`server.py`）仍保留用于兼容，但桌面版入口为 `desktop.py`。
+> 本仓库仅含干净源码：`settings.json`（含 API Key）已被 `.gitignore` 排除，构建产物 `build*/dist*/node_modules` 不提交；EXE 通过 GitHub Releases 发布，不入库。旧浏览器/服务端入口（`server.py`）仍保留用于兼容，但桌面版入口为 `desktop.py`。
