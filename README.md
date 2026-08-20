@@ -18,7 +18,7 @@ python desktop.py
 
 或双击 `启动下载包管家桌面版.bat`。
 
-### 方式二：打包成 EXE（桌面端 APP）
+### 方式二：打包成 EXE（桌面端 APP，推荐给用户）
 
 ```bash
 # 一键打包（自动安装依赖并执行 PyInstaller）
@@ -26,6 +26,15 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
 产物在 `dist/下载包管家智能搜索版-v10.exe`，绿色免安装，可直接发给用户双击运行；也可以发布到 GitHub Releases 供下载。
+
+### 方式三：Electron 打包（备用桌面方案）
+
+本仓库同时保留了 Electron 桌面壳（`desktop-main.cjs` / `preload.cjs`）：
+
+```bash
+npm install
+npm run dist   # 生成 portable 版 EXE（electron-builder）
+```
 
 ## 功能
 
