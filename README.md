@@ -1,6 +1,31 @@
 # 下载包管家（桌面 AI 版）
 
-推荐直接双击桌面的 **下载包管家AI版-V4Flash.exe**。应用使用 Windows WebView2 显示桌面网页界面，直接调用本机 Python，不启动 HTTP 服务、不占用网络端口。
+本机下载包扫描与整理工具。当前版本：**智能搜索版 v10**（桌面端入口 `desktop.py`，界面 `index.html`）。
+
+应用使用 pywebview（Windows WebView2）显示桌面窗口，直接调用本机 Python，不启动 HTTP 服务、不占用网络端口。
+
+## 运行方式
+
+### 方式一：直接运行源码（开发/自用）
+
+```bash
+# 1. 安装依赖（仅需 pywebview）
+pip install -r requirements.txt
+
+# 2. 运行桌面版
+python desktop.py
+```
+
+或双击 `启动下载包管家桌面版.bat`。
+
+### 方式二：打包成 EXE（桌面端 APP）
+
+```bash
+# 一键打包（自动安装依赖并执行 PyInstaller）
+powershell -ExecutionPolicy Bypass -File build.ps1
+```
+
+产物在 `dist/下载包管家智能搜索版-v10.exe`，绿色免安装，可直接发给用户双击运行；也可以发布到 GitHub Releases 供下载。
 
 ## 功能
 
@@ -17,4 +42,4 @@
 
 其中包括 settings.json、ai_descriptions.json、inventory.json 和 user_labels.json。请妥善保护包含 API Key 的 settings.json。
 
-旧浏览器/服务端入口仍保留用于兼容，但桌面版入口为 desktop.py，不会启动旧 HTTP 服务。
+> 本仓库仅含干净源码：`settings.json`（含 API Key）已被 `.gitignore` 排除，构建产物 `build*/dist*/node_modules` 不提交；旧浏览器/服务端入口（`server.py`）仍保留用于兼容，但桌面版入口为 `desktop.py`。
