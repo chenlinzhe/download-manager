@@ -2,7 +2,7 @@
 """下载包管家 - server 纯逻辑单元测试（stdlib unittest，无需额外依赖）。
 运行：python -m unittest discover -s tests -v
 """
-import io, json, os, sys, tempfile, unittest
+import io, json, os, sys, tempfile, unittest, urllib.error
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -177,6 +177,33 @@ class TestCollectionPrejudge(TempApp):
         (p / 'one.txt').write_text('x', encoding='utf-8')
         (p / 'two.txt').write_text('x', encoding='utf-8')
         self.assertIsNone(server.collection_prejudge(p))
+
+
+class TestLlmError(unittest.TestCase):
+    """AI 调用失败时要给出中文可读原因，而不是裸 HTTP 错误。"""
+
+    def _http_error(self, code, payload=None):
+        body = json.dumps(payload or {'error': {'message': 'boom'}}).encode('utf-8')
+        return urllib.error.HTTPError('https://api.deepseek.com', code, 'err', {}, io.BytesIO(body))
+
+    def test_401_mentions_api_key_and_settings(self):
+        msg = server._llm_error(self._http_error(401))
+        self.assertIn('API Key', msg)
+        self.assertIn('模型设置', msg)
+        self.assertIn('401', msg)
+
+    def test_402_mentions_balance(self):
+        self.assertIn('余额', server._llm_error(self._http_error(402)))
+
+    def test_429_mentions_rate_limit(self):
+        self.assertIn('限流', server._llm_error(self._http_error(429)))
+
+    def test_500_mentions_code(self):
+        self.assertIn('HTTP 503', server._llm_error(self._http_error(503)))
+
+    def test_url_error_mentions_network(self):
+        msg = server._llm_error(urllib.error.URLError('timed out'))
+        self.assertIn('连不上', msg)
 
 
 if __name__ == '__main__':

@@ -9,7 +9,7 @@ if getattr(__import__('sys'),'frozen',False):
  APP.mkdir(parents=True,exist_ok=True)
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; SCAN_TTL_DAYS=7
-APP_VERSION='1.1.1'
+APP_VERSION='1.1'
 AI_FAIL_TTL=1800
 SCAN_LOCK=threading.Lock()
 PROGRESS={'phase':'','done':0,'total':0,'at':0.0}
@@ -56,6 +56,27 @@ def open_path(path):
  if p.is_dir(): os.startfile(str(p))
  else: subprocess.Popen(['explorer.exe','/select,',str(p)])
  return str(p)
+
+def _llm_error(e):
+ """把 AI 调用异常翻译成用户能直接看懂的一句话。"""
+ import urllib.error
+ if isinstance(e,urllib.error.HTTPError):
+  try: body=e.read().decode('utf-8','ignore')
+  except Exception: body=''
+  text=body
+  try:
+   parsed=json.loads(body); text=str((parsed.get('error') or {}).get('message') or body)
+  except Exception: pass
+  if e.code==401: return 'DeepSeek 认为 API Key 无效或已失效（HTTP 401）：请打开「模型设置」重新填写 Key，再点「测试连接」确认'
+  if e.code==402: return 'DeepSeek 账户余额不足（HTTP 402），请充值后再试'
+  if e.code==403: return 'DeepSeek 拒绝访问（HTTP 403）：'+text[:120]
+  if e.code==404: return 'DeepSeek 接口地址或模型不存在（HTTP 404）：'+text[:120]
+  if e.code==429: return 'DeepSeek 触发限流（HTTP 429），请稍后再试'
+  if e.code>=500: return 'DeepSeek 服务暂时不可用（HTTP %d），请稍后再试'%e.code
+  return 'DeepSeek 返回错误（HTTP %d）：%s'%(e.code,text[:150])
+ if isinstance(e,(urllib.error.URLError,TimeoutError,OSError)):
+  return '连不上 DeepSeek：%s（请检查网络或代理后重试）'%str(getattr(e,'reason',e))[:140]
+ return 'AI 调用失败：'+str(e)[:150]
 
 _VEC={'fp':None,'idf':None,'docs':None}
 def _search_text(item):
@@ -129,7 +150,8 @@ def natural_search(query):
  def call_llm(prompt):
   body=json.dumps({'model':model,'messages':[{'role':'user','content':prompt}],'temperature':0,'response_format':{'type':'json_object'}}).encode()
   req=urllib.request.Request(base+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
-  raw=urllib.request.urlopen(req,timeout=30).read().decode('utf-8')
+  try: raw=urllib.request.urlopen(req,timeout=30).read().decode('utf-8')
+  except Exception as e: raise RuntimeError(_llm_error(e))
   content=json.loads(raw)['choices'][0]['message']['content'].strip()
   m=re.search(r'\{.*\}',content,re.S)
   if not m: raise ValueError('模型没有返回可解析的搜索条件')
@@ -328,6 +350,7 @@ def test_connection(baseUrl=None, model=None, apiKey=None):
   return {'ok':True,'latencyMs':latency,'endpoint':base,'model':model,'availableModels':ms,'modelOk':model_ok}
  except urllib.error.HTTPError as e:
   code=e.code; msg=e.read().decode('utf-8','ignore')[:300]
+  if code==401: return {'ok':False,'error':'DeepSeek 认为 API Key 无效或已失效（HTTP 401）：请打开「模型设置」重新填写 Key 后重试','endpoint':base}
   if code==404:
    try:
     t0=time.time(); chat_check(); latency=int((time.time()-t0)*1000)
@@ -345,13 +368,16 @@ def item_fingerprint(item): return '|'.join([item['name'].lower(),str(item['size
 def deepseek_description(item):
  import urllib.request
  cfg=get_settings(True); key=cfg.get('apiKey','')
- if not key: raise ValueError('尚未配置 DeepSeek API Key，请打开“软件设置”填写。')
+ if not key: raise ValueError('尚未配置 DeepSeek API Key，请打开「模型设置」填写。')
  prompt=('根据下载包名判断这是什么。只返回严格JSON：{\"summary\":\"10至15个中文字的简短描述\"}。必须给出最可能判断，不能回答无法确认或复述文件名。包名：%s')%item['name']
  body=json.dumps({'model':cfg['model'],'messages':[{'role':'user','content':prompt}],'temperature':0.1,'response_format':{'type':'json_object'}}).encode()
  req=urllib.request.Request(cfg['baseUrl']+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
- response=json.loads(urllib.request.urlopen(req,timeout=30).read().decode('utf-8'))
- content=response['choices'][0]['message']['content'].strip().strip(chr(96)).replace('json\n','',1)
- return json.loads(content)
+ try: response=json.loads(urllib.request.urlopen(req,timeout=30).read().decode('utf-8'))
+ except Exception as e: raise RuntimeError(_llm_error(e))
+ try:
+  content=response['choices'][0]['message']['content'].strip().strip(chr(96)).replace('json\n','',1)
+  return json.loads(content)
+ except (KeyError,IndexError,ValueError) as e: raise RuntimeError('DeepSeek 返回内容无法解析：'+str(e)[:120])
 
 def enrich_items(paths):
  wanted=set(paths); cache=load_json_file(AI_CACHE_FILE,{})
@@ -410,9 +436,12 @@ def classify_collection(p):
                   'temperature':0,'response_format':{'type':'json_object'}}).encode()
  req=urllib.request.Request(cfg['baseUrl']+'/chat/completions',data=body,
   headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
- response=json.loads(urllib.request.urlopen(req,timeout=30).read().decode('utf-8'))
- content=response['choices'][0]['message']['content'].strip().strip(chr(96)).replace('json\n','',1)
- result=json.loads(content)
+ try: response=json.loads(urllib.request.urlopen(req,timeout=30).read().decode('utf-8'))
+ except Exception as e: raise RuntimeError(_llm_error(e))
+ try:
+  content=response['choices'][0]['message']['content'].strip().strip(chr(96)).replace('json\n','',1)
+  result=json.loads(content)
+ except (KeyError,IndexError,ValueError) as e: raise RuntimeError('DeepSeek 返回内容无法解析：'+str(e)[:120])
  return {'isCollection':bool(result.get('isCollection')),'reason':str(result.get('reason',''))[:30]}
 
 def collection_prejudge(p):
