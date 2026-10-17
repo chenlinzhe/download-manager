@@ -121,6 +121,60 @@ class TestKeep(TempApp):
         self.assertEqual(len(labels), 2)
 
 
+class TestUnkeep(TempApp):
+    """取消保留：标签要删掉，建议要立刻按当前磁盘情况重算。"""
+
+    def setUp(self):
+        super().setUp()
+        self.root = self.dir / '下载'
+        self.pkg = self.root / 'tool'
+        self.pkg.mkdir(parents=True)
+        (self.pkg / 'setup.exe').write_bytes(b'x' * 32)
+        server.roots = lambda: [self.root]
+
+    def test_keep_then_unkeep_restores_score(self):
+        server.save_keep([str(self.pkg)])
+        self.assertEqual(server.load_labels()[str(self.pkg.resolve()).lower()]['label'], 'keep')
+        before = server.reanalyze(str(self.pkg))
+        self.assertEqual(before['recommendation'], '保留（手工）')
+        self.assertEqual(before['score'], 100)
+        out = server.remove_keep([str(self.pkg)])
+        self.assertEqual(len(out['removed']), 1)
+        self.assertEqual(server.load_labels(), {})
+        fresh = out['refreshed'][0]
+        self.assertNotIn('manualKeep', fresh)
+        self.assertLess(fresh['score'], 100)
+        self.assertNotEqual(fresh['recommendation'], '保留（手工）')
+        self.assertEqual(fresh['files'], 1)
+
+    def test_unkeep_not_marked_is_noop(self):
+        out = server.remove_keep([str(self.pkg)])
+        self.assertEqual(out, {'removed': [], 'refreshed': []})
+
+    def test_unkeep_syncs_cached_snapshot(self):
+        item = {'name': 'tool', 'path': str(self.pkg), 'score': 100,
+                'recommendation': '保留（手工）', 'manualKeep': True, 'reasons': ['x']}
+        server.save_json_file(server.SNAPSHOT_FILE,
+                              {'generatedAt': '2026-01-01T00:00:00', 'roots': [str(self.root)],
+                               'errors': [], 'items': [dict(item)]})
+        server.CACHE.clear(); server.CACHE.update({'items': [dict(item)], 'at': 0})
+        server.save_keep([str(self.pkg)])
+        server.remove_keep([str(self.pkg)])
+        snap = server.load_json_file(server.SNAPSHOT_FILE, {})
+        self.assertNotIn('manualKeep', snap['items'][0])
+        self.assertNotEqual(snap['items'][0]['recommendation'], '保留（手工）')
+
+    def test_reanalyze_rejects_outside_paths(self):
+        outside = self.dir / 'not-a-root'
+        outside.mkdir()
+        with self.assertRaises(ValueError):
+            server.reanalyze(str(outside))
+
+    def test_reanalyze_missing_path_reported(self):
+        with self.assertRaises(ValueError):
+            server.reanalyze(str(self.root / 'gone'))
+
+
 class TestMove(TempApp):
     def test_partial_failure_reported(self):
         root = self.dir / '下载'

@@ -1,4 +1,4 @@
-let items=[],chosen=new Set(),naturalPaths=null,searchVersion=0,sortKey='',sortDir=1;
+let items=[],chosen=new Set(),naturalPaths=null,searchVersion=0,sortKey='',sortDir=1,lastDestination='',moveTargets=[];
 const native=()=>window.desktop||window.pywebview?.api;const el=id=>document.getElementById(id);function fmt(n){if(!n)return'0 B';let u=['B','KB','MB','GB','TB'],i=Math.min(4,Math.floor(Math.log(n)/Math.log(1024)));return(n/1024**i).toFixed(i?1:0)+' '+u[i]}function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function cls(r){return (r==='建议保留'||r==='保留（手工）')?'keep':r==='待确认'?'review':'drop'}function fuzzy(text,q){text=(text||'').toLowerCase();q=(q||'').toLowerCase().trim();if(!q)return true;return text.includes(q)}const REC_ORDER={'保留（手工）':0,'建议保留':1,'待确认':2,'不用保住':3};
 function sortVal(x,k){switch(k){case'name':return (x.displayName||x.name||'').toLowerCase();case'rec':return REC_ORDER[x.recommendation]===undefined?9:REC_ORDER[x.recommendation];case'score':return x.score||0;case'size':return x.size||0;case'modified':return x.modified||'';case'ai':return (x.aiDescription&&x.aiDescription.summary)?1:0;default:return 0}}
 function setSort(k){if(sortKey===k)sortDir=-sortDir;else{sortKey=k;sortDir=(k==='name'||k==='rec'||k==='ai')?1:-1}document.querySelectorAll('th.sortable').forEach(th=>{th.classList.remove('asc','desc');if(th.dataset.sort===sortKey)th.classList.add(sortDir>0?'asc':'desc')});render()}
@@ -6,7 +6,7 @@ function visible(){let q=el('q').value,f=el('filter').value,r=el('root').value,o
 const STOP=new Set(('的了着是在有和与及或也都就才又再还只但并而这那此其某个吗呢吧啊呀哦嗯哈嗦啦喰么之对从向给被把让到于为以用想找要搜查看请帮哪什该我你他她它咱俺种').split(''));['一个','一下','一种','一些','一类','一款','这个','那个','这些','那些','哪个','哪些','这种','那种','哪种','这么','那么','这样','那样','一点','有些','东西','里面','我们','你们','他们','她们','它们','咱们','自己','可以','想要','需要','应该','看看','点儿','有点儿','如何','为什么','a','an','the','of','for','is','are','it','to','and','or','this','that','these','those','want','find','get','with','my','me','one','we','you','they'].forEach(w=>STOP.add(w));
 function cutTerms(q){q=(q||'').toLowerCase();let toks=q.match(/[a-z0-9]+|[\u4e00-\u9fff]+/g)||[];let out=[],seen=new Set();for(let t of toks){if(t&&!seen.has(t)){seen.add(t);out.push(t);}}let kept=out.filter(c=>!STOP.has(c));return kept.length?kept:out;}
 function aiBox(x){let box=x.aiDescription?'<div class="ai"><b>这是：</b>'+esc(x.aiDescription.summary||'')+'</div>':'<span class="muted">--</span>';let note=x.note?'<div class="mynote">我的备注：'+esc(x.note)+'</div>':'<div class="note-hint">✎ 点击写备注</div>';return box+note}
-function render(){let v=visible();el('body').innerHTML=v.length?v.map(x=>'<tr data-path="'+esc(x.path)+'"><td><input class="pick" type="checkbox" data-id="'+esc(x.id)+'" '+(chosen.has(x.id)?'checked':'')+'></td><td><div class="name">'+esc(x.displayName||x.name)+(x.isNew?' <span class="new">新增</span>':'')+'</div><button class="path open-path" data-path="'+esc(x.parentPath||x.path)+'" title="打开包所在目录">所在目录：'+esc(x.parentPath||x.path)+'</button><div class="muted">'+esc(x.kind)+' · '+x.files+' 文件</div></td><td class="llm" data-path="'+esc(x.path)+'" title="点击可写备注">'+aiBox(x)+'</td><td><span class="badge '+cls(x.recommendation)+'">'+x.recommendation+'</span></td><td><b>'+x.score+'</b></td><td>'+fmt(x.size)+'</td><td>'+esc(x.modified.slice(0,10))+'<div class="muted">'+x.ageDays+' 天前</div></td><td>'+esc(x.redownload)+'</td><td class="'+(x.suspicious?'warn':'')+'">'+esc(x.registration)+'</td><td class="why">'+x.reasons.map(esc).join('；')+'</td></tr>').join(''):'<tr><td colspan="10" class="empty">没有符合筛选条件的项目</td></tr>';document.querySelectorAll('.open-path').forEach(e=>e.onclick=async()=>{let d=await native().open_path(e.dataset.path);if(!d.ok)alert(d.error)});document.querySelectorAll('td.llm').forEach(td=>td.onclick=()=>editNote(td));document.querySelectorAll('.pick').forEach(e=>e.onchange=()=>{e.checked?chosen.add(e.dataset.id):chosen.delete(e.dataset.id);update()});update()}function update(){el('selected').textContent='已选 '+chosen.size+' 项';el('keep').disabled=el('move').disabled=el('del').disabled=!chosen.size}
+function render(){let v=visible();el('body').innerHTML=v.length?v.map(x=>'<tr data-path="'+esc(x.path)+'"><td><input class="pick" type="checkbox" data-id="'+esc(x.id)+'" '+(chosen.has(x.id)?'checked':'')+'></td><td><div class="name">'+esc(x.displayName||x.name)+(x.isNew?' <span class="new">新增</span>':'')+'</div><button class="path open-path" data-path="'+esc(x.parentPath||x.path)+'" title="打开包所在目录">所在目录：'+esc(x.parentPath||x.path)+'</button><div class="muted">'+esc(x.kind)+' · '+x.files+' 文件</div></td><td class="llm" data-path="'+esc(x.path)+'" title="点击可写备注">'+aiBox(x)+'</td><td><span class="badge '+cls(x.recommendation)+'">'+x.recommendation+(x.manualKeep?'<button class="badge-x" data-unkeep="'+esc(x.path)+'" title="取消保留（按实际情况重新评估）">✕</button>':'')+'</span></td><td><b>'+x.score+'</b></td><td>'+fmt(x.size)+'</td><td>'+esc(x.modified.slice(0,10))+'<div class="muted">'+x.ageDays+' 天前</div></td><td>'+esc(x.redownload)+'</td><td class="'+(x.suspicious?'warn':'')+'">'+esc(x.registration)+'</td><td class="why">'+x.reasons.map(esc).join('；')+'</td></tr>').join(''):'<tr><td colspan="10" class="empty">没有符合筛选条件的项目</td></tr>';document.querySelectorAll('.open-path').forEach(e=>e.onclick=async()=>{let d=await native().open_path(e.dataset.path);if(!d.ok)alert(d.error)});document.querySelectorAll('button.badge-x').forEach(b=>b.onclick=e=>{e.stopPropagation();unkeepRows([b.dataset.unkeep])});document.querySelectorAll('td.llm').forEach(td=>td.onclick=()=>editNote(td));document.querySelectorAll('.pick').forEach(e=>e.onchange=()=>{e.checked?chosen.add(e.dataset.id):chosen.delete(e.dataset.id);update()});update()}function update(){el('selected').textContent='已选 '+chosen.size+' 项';el('keep').disabled=el('move').disabled=el('del').disabled=!chosen.size}
 async function load(force){
  el('scanBar').textContent=force?'正在全盘重新扫描…':'正在加载扫描结果…';el('scanBar').title='';el('scanBar').style.color='';
  let api=native(),timer=null;
@@ -26,11 +26,11 @@ async function load(force){
   el('scanBar').textContent=(force?'已重新扫描 · ':'')+roots.length+' 个目录 · 更新于 '+String(d.generatedAt||'').replace('T',' ')+(force?'':'（复用最近扫描结果，点“重新扫描”立即刷新）')+(errs.length?(' · '+errs.length+' 处读取失败（悬停查看）'):'');
   if(errs.length)el('scanBar').title=errs.slice(0,8).join('\n')+(errs.length>8?'\n…':'');
   else el('scanBar').style.color='';
-  if(errs.length)el('scanBar').style.color='#9a6700';
+  if(errs.length)el('scanBar').style.color='var(--warn-fg)';
   render();
   if(api){
    let cfg=await api.get_settings();
-   if(cfg&&cfg.ok&&!el('dest').value)el('dest').value=cfg.result.destination||'';
+   if(cfg&&cfg.ok&&cfg.result&&cfg.result.destination)lastDestination=cfg.result.destination;
    let missing=items.filter(x=>!x.aiDescription&&(force?x.isNew:true)).map(x=>x.path);
    if(cfg&&cfg.ok&&cfg.result.autoSearch&&cfg.result.apiKeyMasked&&missing.length)enrich(missing,true)
   }
@@ -77,7 +77,7 @@ async function openSettings(){
  el('baseUrl').value=c.baseUrl;el('model').value=c.model;el('autoSearch').checked=c.autoSearch;el('apiKey').value='';
  let src=c.keySource==='env'?'（来自环境变量 '+c.keyName+'）':(c.keySource==='file'?'（存在本机配置文件里，建议改成环境变量）':'');
  let s=c.apiKeyMasked?('已配置：'+c.apiKeyMasked+src):'尚未配置';
- if(c.keyFormatProblem){s+='　⚠️ '+c.keyFormatProblem;el('keyStatus').style.color='#cf222e'}else{el('keyStatus').style.color='#636c76'}
+ if(c.keyFormatProblem){s+='　⚠️ '+c.keyFormatProblem;el('keyStatus').style.color='var(--danger-fg)'}else{el('keyStatus').style.color='var(--fg-faint)'}
  el('keyStatus').textContent=s;el('settingsModal').classList.add('open')
 }
 async function saveSettings(){
@@ -91,27 +91,31 @@ async function saveSettings(){
 async function analyzeNow(){if(!native())return alert('AI 分析仅桌面版可用');let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoSearch:el('autoSearch').checked});if(!d.ok)return alert(d.error);let cfg=await native().get_settings();if(!cfg.ok)return alert(cfg.error);if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先填写并保存');if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后再点「立即 AI 分析」。');let missing=items.filter(x=>!x.aiDescription).map(x=>x.path);if(!missing.length)return alert('所有项目都已有 AI 说明，无需分析');el('settingsModal').classList.remove('open');alert('开始 AI 分析 '+missing.length+' 个项目，完成后会提示');await enrich(missing,false)}
 
 async function action(type){
- let paths=[...chosen],dest=el('dest').value.trim();
- if(type==='move'&&!dest)return alert('请先填写转移目标目录。');
- let msg=type==='keep'?'确认将所选项目标为“保留”（永久留用，不受清理建议影响）？':type==='move'?'确认将 '+paths.length+' 项转移到：\n'+dest+'\n同名目标不会覆盖。':'确认将 '+paths.length+' 项移到 Windows 回收站？';
- if(!confirm(msg))return;
- let btn=el(type==='keep'?'keep':type==='move'?'move':'del');btn.disabled=true;
+ if(type==='move')return openMoveDialog([...chosen]);
+ let paths=[...chosen];
+ if(!paths.length)return;
+ if(type==='keep'){
+  if(!confirm('确认将所选 '+paths.length+' 项标为「保留」？\n保留＝永久留用，不受清理建议影响，重新扫描也不会覆盖；想撤销点徽章旁的 ✕ 即可。'))return;
+  let btn=el('keep');btn.disabled=true;
+  try{
+   await postAction('/api/keep',{paths:paths});
+   let want=new Set(paths.map(p=>String(p).toLowerCase()));
+   for(let x of items)if(want.has(String(x.path).toLowerCase())){x.recommendation='保留（手工）';x.score=100;x.manualKeep=true;x.reasons=['你刚标记为保留；重新扫描不会覆盖']}
+   render();refreshCounts();el('status').textContent='已标为保留 '+paths.length+' 项';
+  }catch(e){alert('操作失败：'+e.message)}
+  finally{update()}
+  return;
+ }
+ if(!confirm('确认将 '+paths.length+' 项移到 Windows 回收站？（还能从回收站还原）'))return;
+ let btn=el('del');btn.disabled=true;
  try{
-  let d=await postAction(type==='move'?'/api/move':type==='keep'?'/api/keep':'/api/recycle',{paths:paths,destination:dest});
-  let n=0,extra='';
-  if(type==='move'){
-   let r=d.result||{};n=(r.done||[]).length;
-   let f=r.failed||[];
-   if(f.length)extra='，'+f.length+' 项未处理：\n'+f.slice(0,5).map(x=>(x.path||'')+'（'+(x.error||'')+'）').join('\n')+(f.length>5?'\n（其余 '+(f.length-5)+' 项略）':'');
-   if(n&&dest&&native())await native().save_settings({destination:dest});
-  }else if(Array.isArray(d.result))n=d.result.length;
-  else n=paths.length;
-  alert('操作完成，共处理 '+n+' 项'+extra);
-  await load(true)
+  let d=await postAction('/api/recycle',{paths:paths});
+  let n=Array.isArray(d.result)?d.result.length:paths.length;
+  render();refreshCounts();
+  el('status').textContent='已移到回收站 '+n+' 项';
  }catch(e){alert('操作失败：'+e.message)}
  finally{update()}
-}
-async function clearKey(){
+}async function clearKey(){
  if(!native()||typeof native().save_settings!=='function')return alert('仅桌面版可修改设置');
  if(!confirm('确认清除 DeepSeek API Key（同时删除本机环境变量 DEEPSEEK_API_KEY 与配置文件里的残留）？清除后 AI 说明与智能搜索的语义扩展将不可用。'))return;
  let d=await native().save_settings({clearApiKey:true});
@@ -119,7 +123,7 @@ async function clearKey(){
  el('apiKey').value='';el('keyStatus').textContent='尚未配置';
  alert('已清除 API Key')
 }
-async function testConn(){let btn=el('testConn'),res=el('testResult');btn.disabled=true;res.textContent='正在测试连接…';res.style.color='#636c76';try{if(!native()||typeof native().test_connection!=='function')throw Error('连接测试仅桌面版可用');let d=await native().test_connection({baseUrl:el('baseUrl').value,model:el('model').value,apiKey:el('apiKey').value});if(!d.ok)throw Error(d.error||'连接失败');let ok=d.modelOk===false?('模型“'+d.model+'”不在可用列表'):'连接成功';let lat=d.latencyMs!=null?(' · '+d.latencyMs+' ms'):'';let kt=d.keyTail?(' · Key 尾号 '+d.keyTail):'';res.textContent=ok+lat+kt;if(d.modelOk===false&&d.availableModels&&d.availableModels.length)res.textContent+='；可用模型：'+d.availableModels.join('、');res.style.color=d.modelOk===false?'#9a6700':'#1a7f37';if(d.availableModels&&d.availableModels.length){res.title='可用模型: '+d.availableModels.join(', ');window.diagModels=d.availableModels}}catch(e){res.textContent='连接失败：'+e.message;res.style.color='#cf222e'}finally{btn.disabled=false}}
+async function testConn(){let btn=el('testConn'),res=el('testResult');btn.disabled=true;res.textContent='正在测试连接…';res.style.color='var(--fg-faint)';try{if(!native()||typeof native().test_connection!=='function')throw Error('连接测试仅桌面版可用');let d=await native().test_connection({baseUrl:el('baseUrl').value,model:el('model').value,apiKey:el('apiKey').value});if(!d.ok)throw Error(d.error||'连接失败');let ok=d.modelOk===false?('模型“'+d.model+'”不在可用列表'):'连接成功';let lat=d.latencyMs!=null?(' · '+d.latencyMs+' ms'):'';let kt=d.keyTail?(' · Key 尾号 '+d.keyTail):'';res.textContent=ok+lat+kt;if(d.modelOk===false&&d.availableModels&&d.availableModels.length)res.textContent+='；可用模型：'+d.availableModels.join('、');res.style.color=d.modelOk===false?'var(--warn-fg)':'var(--ok-fg)';if(d.availableModels&&d.availableModels.length){res.title='可用模型: '+d.availableModels.join(', ');window.diagModels=d.availableModels}}catch(e){res.textContent='连接失败：'+e.message;res.style.color='var(--danger-fg)'}finally{btn.disabled=false}}
 document.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>setSort(th.dataset.sort));el('settingsBtn').onclick=openSettings;el('testConn').onclick=testConn;el('smartSearch').onclick=smartSearch;el('clearKey').onclick=clearKey;el('settingsCancel').onclick=()=>el('settingsModal').classList.remove('open');el('settingsAnalyze').onclick=analyzeNow;el('settingsSave').onclick=saveSettings;el('q').oninput=()=>{searchVersion++;naturalPaths=null;el('searchStatus').textContent='';el('smartSearch').disabled=false;el('smartSearch').classList.remove('searching');el('smartSearch').textContent='智能搜索';render()};el('q').onkeydown=e=>{if(e.key==='Enter')smartSearch()};el('filter').onchange=render;el('onlyNew').onchange=render;el('root').onchange=()=>{if(el('root').value==='__add__'){el('root').value='';addRoot()}else render()};el('rescan').onclick=()=>load(true);el('keep').onclick=()=>action('keep');el('move').onclick=()=>action('move');el('del').onclick=()=>action('delete');el('all').onchange=e=>{visible().forEach(x=>e.target.checked?chosen.add(x.id):chosen.delete(x.id));render()};
 let started=false;async function startWhenReady(){if(started)return;let api=native();if(api&&typeof api.scan==='function'&&typeof api.enrich==='function'){started=true;el('status').textContent='原生接口已连接';try{let v=await api.app_version();if(v&&v.ok&&v.result)el('ver').textContent='V'+v.result}catch(_){}await load(false);return}el('status').textContent='正在连接本机分析接口…';setTimeout(startWhenReady,200)}window.addEventListener('pywebviewready',startWhenReady);startWhenReady();
 
@@ -153,32 +157,36 @@ function openCtx(ev,tr){
  let item=items.find(x=>x.path===tr.dataset.path);if(!item)return;
  let multi=chosen.has(item.id)&&chosen.size>1,targets=multi?items.filter(x=>chosen.has(x.id)):[item],paths=targets.map(x=>x.path);
  ctxTarget={item:item,tr:tr,paths:paths,targets:targets,multi:multi};
+ let anyKeep=targets.some(x=>x.manualKeep),canKeep=targets.some(x=>!x.manualKeep);
  let m=el('ctxMenu');
  m.innerHTML='<div class="ctx-head">'+(multi?('已选 '+paths.length+' 项'):esc(item.displayName||item.name))+'</div>'
   +'<button data-act="ai">AI 分析</button>'
   +'<button data-act="note">写 / 改备注</button>'
-  +'<button data-act="keep">标为保留</button>'
+  +'<div class="ctx-sep"></div>'
+  +'<button data-act="keep"'+(canKeep?'':' disabled')+'>标为保留</button>'
+  +'<button data-act="unkeep"'+(anyKeep?'':' disabled')+'>取消保留</button>'
+  +'<div class="ctx-sep"></div>'
   +'<button data-act="ignore">忽略（以后扫描跳过）</button>'
   +'<button data-act="open">打开所在目录</button>'
-  +'<button data-act="move">转移到「目标目录」</button>'
+  +'<div class="ctx-sep"></div>'
+  +'<button data-act="move">转移到其他目录…</button>'
   +'<button data-act="del" class="danger">移到回收站</button>';
- m.querySelectorAll('button').forEach(b=>b.onclick=e=>{e.stopPropagation();runCtx(b.dataset.act)});
+ m.querySelectorAll('button').forEach(b=>b.onclick=e=>{e.stopPropagation();if(b.disabled)return;runCtx(b.dataset.act)});
  m.classList.add('open');
- let w=m.offsetWidth||210,h=m.offsetHeight||270,x=ev.clientX||0,y=ev.clientY||0;
+ let w=m.offsetWidth||216,h=m.offsetHeight||300,x=ev.clientX||0,y=ev.clientY||0;
  m.style.left=Math.max(6,Math.min(x,window.innerWidth-w-8))+'px';
  m.style.top=Math.max(6,Math.min(y,window.innerHeight-h-8))+'px';
-}
-async function runCtx(act){
+}async function runCtx(act){
  let t=ctxTarget;closeCtx();if(!t)return;
  if(act==='note'){if(t.multi)return alert('备注是单个项目的，请只对一行操作。');let td=t.tr.querySelector('td.llm');if(td)editNote(td);return}
  if(act==='ai'){await enrichRows(t.paths);return}
  if(act==='keep'){await keepRows(t.paths);return}
+ if(act==='unkeep'){await unkeepRows(t.paths);return}
  if(act==='ignore'){await ignoreRows(t.targets);return}
  if(act==='open'){let d=await native().open_path(t.item.parentPath||t.item.path);if(!d.ok)alert(d.error);return}
- if(act==='move'){await moveRows(t.paths);return}
+ if(act==='move'){openMoveDialog(t.paths);return}
  if(act==='del'){await deleteRows(t.paths);return}
-}
-async function enrichRows(paths){
+}async function enrichRows(paths){
  let api=native();
  if(!api||typeof api.enrich!=='function')return alert('AI 分析仅桌面版可用');
  if(!paths||!paths.length)return alert('没有需要分析的项目');
@@ -214,19 +222,6 @@ async function ignoreRows(targets){
  el('scanBar').textContent='已忽略 '+names.length+' 个项目，重新扫描时不会再出现（可在「忽略名单」里恢复）';
  if(errs.length)alert('部分项目忽略失败：\n'+errs.slice(0,5).join('\n'))
 }
-async function moveRows(paths){
- let api=native(),dest=el('dest').value.trim();
- if(!api||typeof api.move!=='function')return alert('仅桌面版可用');
- if(!dest)return alert('请先在工具栏「转移目标」里填写一个绝对路径目录，例如 F:\\下载包归档');
- if(!confirm('确认把 '+paths.length+' 项转移到：\n'+dest+'\n同名目标不会覆盖。'))return;
- let d=await api.move(paths,dest);
- if(!d.ok)return alert(d.error);
- let r=d.result||{},done=r.done||[],failed=r.failed||[];
- if(done.length&&typeof api.save_settings==='function')await api.save_settings({destination:dest});
- dropItems(new Set(done.map(x=>String(x.from).toLowerCase())));
- let extra=failed.length?('\n'+failed.length+' 项未处理：\n'+failed.slice(0,5).map(x=>(x.path||'')+'（'+(x.error||'')+'）').join('\n')):'';
- alert('已转移 '+done.length+' 项'+extra)
-}
 async function deleteRows(paths){
  let api=native();
  if(!api||typeof api.recycle!=='function')return alert('仅桌面版可用');
@@ -252,8 +247,120 @@ async function openIgnoreList(){
  });
  el('ignoreModal').classList.add('open')
 }
-el('body').addEventListener('contextmenu',ev=>{let tr=ev.target.closest('tr[data-path]');if(!tr)return;ev.preventDefault();openCtx(ev,tr)});
+/* ---------- V1.4：转移弹窗 / 取消保留 / 深浅主题 ---------- */
+function validDest(p){return /^[a-zA-Z]:[\\/]/.test(p)||/^\\\\/.test(p)}
+function openMoveDialog(paths){
+ paths=(paths||[]).filter(Boolean);
+ if(!paths.length)return alert('请先勾选要转移的项目。');
+ moveTargets=paths;
+ let names=paths.map(p=>String(p).split(/[\\/]/).filter(Boolean).pop()||p);
+ el('moveSelected').textContent=names.length<=3?names.join('、'):(names.slice(0,3).join('、')+' 等 '+names.length+' 项');
+ el('moveDest').value=lastDestination||'';
+ let res=el('moveResult');res.textContent='';res.className='move-result';
+ let recent=el('moveRecent');recent.innerHTML='';
+ if(lastDestination){
+  let chip=document.createElement('button');
+  chip.type='button';chip.className='chip';chip.textContent='上次用过：'+lastDestination;
+  chip.onclick=()=>{el('moveDest').value=lastDestination};
+  recent.appendChild(chip);
+ }
+ let btn=el('moveConfirm');
+ btn.textContent='开始转移';btn.disabled=false;
+ el('moveModal').classList.add('open');
+ setTimeout(()=>{let d=el('moveDest');d.focus();d.select()},30);
+}
+async function moveBrowse(){
+ let api=native();
+ if(!api||typeof api.pick_folder!=='function')return alert('选择目录仅桌面版可用');
+ let d;
+ try{d=await api.pick_folder()}catch(e){d={ok:false,error:e.message}}
+ if(!d||d.cancelled)return;
+ if(!d.ok)return alert('选择目录失败：'+((d&&d.error)||'未知错误'));
+ el('moveDest').value=d.result||'';
+}
+async function runMove(){
+ let api=native();
+ if(!api||typeof api.move!=='function')return alert('转移仅桌面版可用');
+ if(!moveTargets.length)return alert('没有要转移的项目。');
+ let dest=el('moveDest').value.trim(),res=el('moveResult'),btn=el('moveConfirm');
+ if(!dest)return alert('请先填写或选择目标目录。');
+ if(!validDest(dest)){res.className='move-result err';res.textContent='目标目录要写成绝对路径，例如 F:\\下载包归档 或 \\\\NAS\\归档。';return}
+ btn.disabled=true;btn.textContent='正在转移…';
+ res.className='move-result';res.textContent='正在转移 '+moveTargets.length+' 项，请稍候…';
+ let d;
+ try{d=await api.move(moveTargets,dest)}catch(e){d={ok:false,error:e.message}}
+ if(!d||!d.ok){
+  btn.disabled=false;btn.textContent='重试';
+  res.className='move-result err';res.textContent='转移失败：'+((d&&d.error)||'未知错误');
+  return;
+ }
+ let r=d.result||{},done=r.done||[],failed=r.failed||[];
+ if(done.length){
+  lastDestination=dest;
+  if(typeof api.save_settings==='function'){try{await api.save_settings({destination:dest})}catch(_){}}
+ }
+ dropItems(new Set(done.map(x=>String(x.from).toLowerCase())));
+ moveTargets=failed.map(x=>x.path).filter(Boolean);
+ let lines=['已转移 '+done.length+' 项'+(failed.length?('，'+failed.length+' 项未处理（已留在列表里）'):'')+'。'];
+ if(failed.length){
+  failed.slice(0,5).forEach(x=>lines.push((x.path||'')+'（'+(x.error||'未知错误')+'）'));
+  if(failed.length>5)lines.push('…其余 '+(failed.length-5)+' 项略');
+ }
+ res.className=failed.length?'move-result err':'move-result';
+ res.textContent=lines.join('\n');
+ btn.disabled=false;
+ if(moveTargets.length)btn.textContent='重试剩余 '+moveTargets.length+' 项';
+ else btn.textContent='完成';
+ el('status').textContent='已转移 '+done.length+' 项到 '+dest;
+}
+async function unkeepRows(paths){
+ let api=native();
+ if(!api||typeof api.unkeep!=='function')return alert('取消保留仅桌面版可用');
+ paths=(paths||[]).filter(Boolean);
+ if(!paths.length)return;
+ if(!confirm('确认取消保留 '+paths.length+' 项？\n取消后会按磁盘实际情况重新评估建议，不再固定为「保留」。'))return;
+ let d;
+ try{d=await api.unkeep(paths)}catch(e){d={ok:false,error:e.message}}
+ if(!d||!d.ok)return alert('取消失败：'+((d&&d.error)||'未知错误'));
+ let result=d.result||{},refreshed=result.refreshed||[],removed=result.removed||[];
+ if(!removed.length)return alert('这些项目本来就没有「手工保留」标记。');
+ let byPath=new Map(refreshed.map(f=>[String(f.path||'').toLowerCase(),f])),n=0;
+ for(let x of items){
+  let f=byPath.get(String(x.path).toLowerCase());
+  if(!f)continue;
+  delete x.manualKeep;
+  Object.assign(x,f);
+  if(f.manualKeep)x.manualKeep=true;
+  n++;
+ }
+ render();refreshCounts();
+ let miss=removed.length-n;
+ el('status').textContent='已取消保留 '+removed.length+' 项'+(refreshed.length?'，建议已重新评估':'')+(miss>0?('（'+miss+' 项不在当前列表，可能已被移动或忽略）'):'');
+}
+const THEME_KEY='dpm-theme';
+function applyTheme(dark){
+ document.documentElement.classList.toggle('dark',!!dark);
+ let b=el('themeBtn');
+ if(b){b.textContent=dark?'☀':'☾';b.title=dark?'切换到浅色主题':'切换到深色主题'}
+}
+function initTheme(){
+ let saved='';
+ try{saved=localStorage.getItem(THEME_KEY)||''}catch(_){}
+ let dark=saved?saved==='dark':!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);
+ applyTheme(dark);
+ let b=el('themeBtn');
+ if(b)b.onclick=()=>{
+  let next=!document.documentElement.classList.contains('dark');
+  applyTheme(next);
+  try{localStorage.setItem(THEME_KEY,next?'dark':'light')}catch(_){}
+ };
+}el('body').addEventListener('contextmenu',ev=>{let tr=ev.target.closest('tr[data-path]');if(!tr)return;ev.preventDefault();openCtx(ev,tr)});
 document.addEventListener('click',ev=>{if(!ev.target.closest('#ctxMenu'))closeCtx()});
-document.addEventListener('keydown',ev=>{if(ev.key==='Escape'){closeCtx();el('ignoreModal').classList.remove('open')}});
+document.addEventListener('keydown',ev=>{if(ev.key==='Escape'){closeCtx();el('ignoreModal').classList.remove('open');el('moveModal').classList.remove('open')}});
 window.addEventListener('blur',closeCtx);
 el('aiAnalyze').onclick=aiAnalyze;el('ignoreList').onclick=openIgnoreList;el('ignoreClose').onclick=()=>el('ignoreModal').classList.remove('open');
+el('moveBrowse').onclick=moveBrowse;
+el('moveCancel').onclick=()=>el('moveModal').classList.remove('open');
+el('moveConfirm').onclick=runMove;
+el('moveDest').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();runMove()}else if(e.key==='Escape'){e.preventDefault();el('moveModal').classList.remove('open')}};
+initTheme();

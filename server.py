@@ -9,7 +9,7 @@ if getattr(__import__('sys'),'frozen',False):
  APP.mkdir(parents=True,exist_ok=True)
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
-APP_VERSION='1.3'
+APP_VERSION='1.4'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -675,6 +675,64 @@ def _finalize(data):
  """扫描结果统一出口：附加备注 + 过滤忽略名单。"""
  return _drop_ignored(_with_notes(data))
 
+def _manual_keep_fields(manual):
+ """「标为保留」在条目上体现出来的字段（扫描与单条重算共用）。"""
+ when=(manual or {}).get('markedAt') or '此前'
+ return {'recommendation':'保留（手工）','score':100,'manualKeep':True,
+         'reasons':['你在 '+when+' 手工标记为保留；重新扫描不会覆盖']}
+
+def _patch_cached_items(fields_list):
+ """把重算后的字段同步进内存缓存与快照，避免旧快照把新结果又盖回去。"""
+ if not fields_list: return
+ by_path={str(x.get('path') or '').lower():x for x in fields_list if x}
+ def merge(it,f):
+  # 取消保留时新字段里没有 manualKeep，必须显式删掉旧值
+  if not f.get('manualKeep'): it.pop('manualKeep',None)
+  it.update(f)
+ with LOCK:
+  for it in CACHE.get('items') or []:
+   f=by_path.get(str(it.get('path') or '').lower())
+   if f: merge(it,f)
+ snap=load_json_file(SNAPSHOT_FILE,None)
+ if isinstance(snap,dict) and isinstance(snap.get('items'),list):
+  changed=False
+  for it in snap['items']:
+   f=by_path.get(str(it.get('path') or '').lower())
+   if f: merge(it,f); changed=True
+  if changed: save_json_file(SNAPSHOT_FILE,snap)
+
+def reanalyze(path):
+ """按当前磁盘状态重算单个项目的建议（取消保留后立刻刷新，不必全盘重扫）。"""
+ p=Path(path)
+ if not allowed(p): raise ValueError('不在扫描范围内')
+ if not p.exists(): raise ValueError('项目已不存在，可能已被移动或删除')
+ size,files,dirs,newest,hints,errs=summary(p); newest=newest or p.stat().st_mtime
+ fields=analyze(p,size,files,newest,hints)
+ manual=load_labels().get(str(p.resolve()).lower())
+ if manual and manual.get('label')=='keep': fields.update(_manual_keep_fields(manual))
+ fields.update(path=str(p),size=size,files=files,dirs=dirs,readErrors=errs,
+               modified=datetime.fromtimestamp(newest).isoformat(timespec='seconds'))
+ return fields
+
+def remove_keep(paths):
+ """取消手工「标为保留」，并立刻重算这些项目的建议。"""
+ labels=load_labels(); removed=[]
+ for x in paths:
+  p=Path(x)
+  try: key=str(p.resolve()).lower()
+  except OSError: continue
+  if labels.pop(key,None) is not None: removed.append(str(p.resolve()))
+ if not removed: return {'removed':[],'refreshed':[]}
+ tmp=LABELS_FILE.with_suffix('.tmp')
+ tmp.parent.mkdir(parents=True,exist_ok=True)
+ tmp.write_text(json.dumps(labels,ensure_ascii=False,indent=2),encoding='utf-8'); os.replace(tmp,LABELS_FILE)
+ refreshed=[]
+ for x in removed:
+  try: refreshed.append(reanalyze(x))
+  except (OSError,ValueError): pass
+ _patch_cached_items(refreshed)
+ return {'removed':removed,'refreshed':refreshed}
+
 def save_keep(paths):
  labels=load_labels(); now=datetime.now().isoformat(timespec='seconds'); marked=[]; base=roots()
  for x in paths:
@@ -684,6 +742,11 @@ def save_keep(paths):
  if marked:
   tmp=LABELS_FILE.with_suffix('.tmp')
   tmp.write_text(json.dumps(labels,ensure_ascii=False,indent=2),encoding='utf-8'); os.replace(tmp,LABELS_FILE)
+  refreshed=[]
+  for x in marked:
+   fields=dict(_manual_keep_fields(labels.get(x.lower())))
+   fields['path']=x; refreshed.append(fields)
+  _patch_cached_items(refreshed)
  return marked
 
 def scan(force=False):
@@ -722,9 +785,7 @@ def _scan_impl(force=False):
     item['collection']=collection; item['displayName']=collection+' / '+p.name
     item['reasons']=['来自集合目录“'+collection+'”（'+collection_reason+'）']+item['reasons']
    manual=labels.get(str(p.resolve()).lower())
-   if manual and manual.get('label')=='keep':
-    item.update(recommendation='保留（手工）',score=100,manualKeep=True)
-    item['reasons']=['你在 '+manual.get('markedAt','此前')+' 手工标记为保留；重新扫描不会覆盖']
+   if manual and manual.get('label')=='keep': item.update(_manual_keep_fields(manual))
    fp=item_fingerprint(item); item['fingerprint']=fp; item['aiDescription']=({'summary':media_kind,'model':'本地媒体识别'} if media_kind else ai_cache.get(fp)); item['isNew']=False if baseline else fp not in old_inventory
    out.append(item)
   except OSError as e: errors.append(str(e))
