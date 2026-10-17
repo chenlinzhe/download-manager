@@ -38,6 +38,9 @@ class Api:
  def enrich(self, paths):
   try: return server.enrich_items(paths)
   except Exception as e: return {'ok':False,'error':str(e)}
+ def set_note(self, path, text):
+  try: return {'ok':True,'result':server.save_note(path,text)}
+  except Exception as e: return {'ok':False,'error':str(e)}
  def app_version(self):
   try: return {'ok':True,'result':server.APP_VERSION}
   except Exception as e: return {'ok':False,'error':str(e)}

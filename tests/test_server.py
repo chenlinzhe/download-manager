@@ -18,7 +18,7 @@ class TempApp(unittest.TestCase):
         self._saved = {}
         for name in ('SETTINGS_FILE', 'LABELS_FILE', 'SNAPSHOT_FILE', 'INVENTORY_FILE',
                      'AI_CACHE_FILE', 'COLLECTION_CACHE_FILE', 'COLLECTION_FAIL_FILE',
-                     'MANUAL_ROOTS_FILE'):
+                     'MANUAL_ROOTS_FILE', 'NOTES_FILE'):
             self._saved[name] = getattr(server, name)
             setattr(server, name, self.dir / (name.lower() + '.json'))
         self._roots = server.roots
@@ -204,6 +204,40 @@ class TestLlmError(unittest.TestCase):
     def test_url_error_mentions_network(self):
         msg = server._llm_error(urllib.error.URLError('timed out'))
         self.assertIn('连不上', msg)
+
+
+class TestNotes(TempApp):
+    """备注：点击 AI 说明那一格写的文字要能存下来并参与搜索。"""
+
+    def test_save_and_reload(self):
+        path = 'D:\\Downloads\\tool.zip'
+        r = server.save_note(path, u'  给小李用  \n 别删 ')
+        self.assertEqual(r['note'], u'给小李用 别删')
+        self.assertEqual(server.load_notes()[path], u'给小李用 别删')
+
+    def test_empty_note_removes(self):
+        path = 'D:\\Downloads\\tool.zip'
+        server.save_note(path, u'临时')
+        server.save_note(path, u'   ')
+        self.assertNotIn(path, server.load_notes())
+
+    def test_length_capped(self):
+        self.assertEqual(len(server.save_note('p', u'长' * 500)['note']), 200)
+
+    def test_missing_path_rejected(self):
+        with self.assertRaises(ValueError):
+            server.save_note('', u'x')
+
+    def test_note_merged_into_items(self):
+        server.save_note('D:\\Downloads\\a.zip', u'装机必备')
+        data = {'items': [{'path': 'D:\\Downloads\\a.zip'}, {'path': 'D:\\Downloads\\b.zip'}]}
+        merged = server._with_notes(data)
+        self.assertEqual(merged['items'][0]['note'], u'装机必备')
+        self.assertEqual(merged['items'][1]['note'], '')
+
+    def test_note_used_by_search_text(self):
+        item = server._search_text({'name': 'x.zip', 'note': u'装机必备'})
+        self.assertIn(u'装机必备', item)
 
 
 if __name__ == '__main__':

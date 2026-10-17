@@ -8,7 +8,7 @@ if getattr(__import__('sys'),'frozen',False):
  APP=Path(os.environ.get('LOCALAPPDATA',Path.home()))/'DownloadPackageManager'
  APP.mkdir(parents=True,exist_ok=True)
 LABELS_FILE=APP/'user_labels.json'
-SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; SCAN_TTL_DAYS=7
+SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; SCAN_TTL_DAYS=7
 APP_VERSION='1.1'
 AI_FAIL_TTL=1800
 SCAN_LOCK=threading.Lock()
@@ -80,7 +80,7 @@ def _llm_error(e):
 
 _VEC={'fp':None,'idf':None,'docs':None}
 def _search_text(item):
- return ' '.join([item.get('name',''),item.get('displayName',''),item.get('path',''),item.get('kind',''),(item.get('aiDescription') or {}).get('summary',''),item.get('recommendation','')]).lower()
+ return ' '.join([item.get('name',''),item.get('displayName',''),item.get('path',''),item.get('kind',''),(item.get('aiDescription') or {}).get('summary',''),item.get('recommendation',''),item.get('note') or '']).lower()
 _STOP=set('的了着是在有和与及或也都就才又再还只但并而这那此其某个吗呢吧啊呀哦嗯哈嗦啦喰么之对从向给被把让到于为以用想找要搜查看请帮哪什该我你他她它咱侩种')
 _STOP|={'一个','一下','一种','一些','一类','一款','这个','那个','这些','那些','哪个','哪些','这种','那种','哪种','这么','那么','这样','那样','一点','有些','东西','里面','我们','你们','他们','她们','它们','咱们','自己','可以','想要','需要','应该','看看','点儿','有点儿','如何','为什么'}
 _STOP|={'a','an','the','of','for','is','are','it','to','and','or','this','that','these','those','want','find','get','with','my','me','one','we','you','they'}
@@ -491,6 +491,31 @@ def load_labels():
   return data if isinstance(data,dict) else {}
  except (OSError,json.JSONDecodeError): return {}
 
+def load_notes():
+ try:
+  data=json.loads(NOTES_FILE.read_text(encoding='utf-8'))
+  return data if isinstance(data,dict) else {}
+ except (OSError,json.JSONDecodeError): return {}
+
+def save_note(path, text):
+ """保存用户自己写的备注（按包路径存，最多 200 字；留空即删除）。"""
+ notes=load_notes(); key=str(path or '')
+ if not key: raise ValueError('缺少包路径')
+ note=' '.join(str(text or '').split())[:200]
+ if note: notes[key]=note
+ else: notes.pop(key,None)
+ tmp=NOTES_FILE.with_suffix('.tmp')
+ tmp.parent.mkdir(parents=True,exist_ok=True)
+ tmp.write_text(json.dumps(notes,ensure_ascii=False,indent=2),encoding='utf-8'); os.replace(tmp,NOTES_FILE)
+ return {'path':key,'note':note}
+
+def _with_notes(data):
+ if not isinstance(data,dict) or not isinstance(data.get('items'),list): return data
+ notes=load_notes()
+ for item in data['items']:
+  if isinstance(item,dict): item['note']=notes.get(str(item.get('path')),'')
+ return data
+
 def save_keep(paths):
  labels=load_labels(); now=datetime.now().isoformat(timespec='seconds'); marked=[]; base=roots()
  for x in paths:
@@ -508,11 +533,11 @@ def scan(force=False):
   finally: set_progress(''); SCAN_LOCK.release()
  with LOCK: cached=dict(CACHE) if CACHE.get('items') else None
  if cached:
-  cached.pop('at',None); return cached
+  cached.pop('at',None); return _with_notes(cached)
  SCAN_LOCK.acquire()
  try:
   snap=load_json_file(SNAPSHOT_FILE,None)
-  if isinstance(snap,dict) and isinstance(snap.get('items'),list): return snap
+  if isinstance(snap,dict) and isinstance(snap.get('items'),list): return _with_notes(snap)
   return _scan_impl(False)
  finally: set_progress(''); SCAN_LOCK.release()
 
@@ -525,7 +550,7 @@ def _scan_impl(force=False):
    if 0<=age<SCAN_TTL_DAYS*86400:
     data={'generatedAt':snap['generatedAt'],'items':snap['items'],'roots':snap.get('roots',[]),'errors':snap.get('errors',[])}
     with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
-    return data
+    return _with_notes(data)
  set_progress('枚举扫描目录'); rr=roots(); out=[]; errors=[]; labels=load_labels(); ai_cache=load_json_file(AI_CACHE_FILE,{}); old_inventory=set(load_json_file(INVENTORY_FILE,[])); baseline=not INVENTORY_FILE.exists()
  def add_item(p,root,collection=None,collection_reason='',media_kind=''):
   try:
@@ -570,7 +595,7 @@ def _scan_impl(force=False):
  data={'generatedAt':datetime.now().isoformat(timespec='seconds'),'items':out,'roots':[str(x) for x in rr],'errors':errors,'version':APP_VERSION}
  save_json_file(SNAPSHOT_FILE,data)
  with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
- return data
+ return _with_notes(data)
 
 def allowed(p,root_list=None):
  try:
