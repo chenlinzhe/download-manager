@@ -18,6 +18,9 @@ class Api:
    path=result[0] if isinstance(result,(list,tuple)) else result
    return {'ok':True,'result':server.add_manual_root(path)}
   except Exception as e: return {'ok':False,'error':str(e)}
+ def tokenize(self, query):
+  try: return {'ok':True,'result':server.split_query_terms(query)}
+  except Exception as e: return {'ok':False,'error':str(e)}
  def natural_search(self, query):
   try: return {'ok':True,'result':server.natural_search(query)}
   except Exception as e: return {'ok':False,'error':str(e)}
@@ -27,8 +30,19 @@ class Api:
  def save_settings(self, data):
   try: return {'ok':True,'result':server.save_settings(data)}
   except Exception as e: return {'ok':False,'error':str(e)}
+ def test_connection(self, data=None):
+  try:
+   data=data or {}
+   return server.test_connection(data.get('baseUrl'),data.get('model'),data.get('apiKey'))
+  except Exception as e: return {'ok':False,'error':str(e)}
  def enrich(self, paths):
   try: return server.enrich_items(paths)
+  except Exception as e: return {'ok':False,'error':str(e)}
+ def app_version(self):
+  try: return {'ok':True,'result':server.APP_VERSION}
+  except Exception as e: return {'ok':False,'error':str(e)}
+ def scan_status(self):
+  try: return server.scan_status()
   except Exception as e: return {'ok':False,'error':str(e)}
  def scan(self, force=False):
   try: return server.scan(force)
@@ -51,7 +65,7 @@ def fatal(text):
 if __name__=='__main__':
  try:
   url=resource('index.html').as_uri()
-  webview.create_window('下载包管家 v11',url,js_api=Api(),width=1500,height=900,min_size=(900,600))
+  webview.create_window('下载包管家 v11 · '+server.APP_VERSION,url,js_api=Api(),width=1500,height=900,min_size=(900,600))
   webview.start(debug=False)
  except Exception:
   fatal(traceback.format_exc())

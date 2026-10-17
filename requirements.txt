@@ -1,1 +1,2 @@
 pywebview>=5.0
+jieba>=0.42

@@ -10,7 +10,8 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['PyQt5', 'PySide2', 'PySide6', 'tkinter'],
+    excludes=['PyQt5', 'PySide2', 'PySide6', 'tkinter', 'torch', 'torchvision', 'torchaudio', 'tensorflow', 'keras', 'IPython', 'numba', 'scipy', 'sklearn', 'numpy', 'pandas', 'matplotlib', 'pyspark',
+              'PIL', 'Pillow', 'cryptography', 'bcrypt', 'mako', 'jinja2', 'MarkupSafe', 'pygments', 'psutil', 'bs4', 'lxml', 'pytz', 'dateutil', 'pytest', 'docutils', 'sphinx'],
     noarchive=False,
     optimize=0,
 )
@@ -23,6 +24,8 @@ exe = EXE(
     a.datas,
     [],
     name='下载包管家智能搜索版-v11',
+    icon='app.ico',
+    version='version_info.txt',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -1,4 +1,4 @@
-import json, os, re, shutil, subprocess, threading, time, urllib.parse
+import base64, ctypes, json, os, re, shutil, subprocess, threading, time, urllib.parse
 from datetime import datetime
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -8,7 +8,14 @@ if getattr(__import__('sys'),'frozen',False):
  APP=Path(os.environ.get('LOCALAPPDATA',Path.home()))/'DownloadPackageManager'
  APP.mkdir(parents=True,exist_ok=True)
 LABELS_FILE=APP/'user_labels.json'
-SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; SCAN_TTL_DAYS=7
+SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; SCAN_TTL_DAYS=7
+APP_VERSION='1.1.1'
+AI_FAIL_TTL=1800
+SCAN_LOCK=threading.Lock()
+PROGRESS={'phase':'','done':0,'total':0,'at':0.0}
+def set_progress(phase,done=0,total=0):
+ PROGRESS.update(phase=phase,done=done,total=total,at=time.time())
+def scan_status(): return dict(PROGRESS)
 NAMES={'down','download','downloads','downloda'}
 def download_dir(name):
  low=name.lower()
@@ -50,43 +57,141 @@ def open_path(path):
  else: subprocess.Popen(['explorer.exe','/select,',str(p)])
  return str(p)
 
+_VEC={'fp':None,'idf':None,'docs':None}
+def _search_text(item):
+ return ' '.join([item.get('name',''),item.get('displayName',''),item.get('path',''),item.get('kind',''),(item.get('aiDescription') or {}).get('summary',''),item.get('recommendation','')]).lower()
+_STOP=set('的了着是在有和与及或也都就才又再还只但并而这那此其某个吗呢吧啊呀哦嗯哈嗦啦喰么之对从向给被把让到于为以用想找要搜查看请帮哪什该我你他她它咱侩种')
+_STOP|={'一个','一下','一种','一些','一类','一款','这个','那个','这些','那些','哪个','哪些','这种','那种','哪种','这么','那么','这样','那样','一点','有些','东西','里面','我们','你们','他们','她们','它们','咱们','自己','可以','想要','需要','应该','看看','点儿','有点儿','如何','为什么'}
+_STOP|={'a','an','the','of','for','is','are','it','to','and','or','this','that','these','those','want','find','get','with','my','me','one','we','you','they'}
+def _tok(text):
+ import jieba, re
+ text=(text or '').lower()
+ toks=[]
+ for seg in jieba.lcut(text):
+  seg=seg.strip()
+  if not seg: continue
+  if re.fullmatch(r'[\u4e00-\u9fff]+',seg):
+   toks.append(seg)
+  else:
+   for w in re.findall(r'[a-z0-9]+',seg):
+    if w: toks.append(w)
+ kept=[t for t in toks if t not in _STOP]
+ return kept if kept else toks
+def _tfidf(toks,idf):
+ n=len(toks) or 1; c={}
+ for t in toks: c[t]=c.get(t,0)+1
+ return {t:(f/n)*idf[t] for t,f in c.items() if t in idf}
+def _cos(a,b):
+ if not a or not b: return 0.0
+ if len(a)>len(b): a,b=b,a
+ dot=sum(fa*b.get(t,0.0) for t,fa in a.items())
+ na=sum(f*f for f in a.values())**0.5
+ nb=sum(f*f for f in b.values())**0.5
+ return dot/(na*nb+1e-9) if (na and nb) else 0.0
+def _vector_index(items):
+ import math
+ try:
+  from collections import Counter
+ except Exception: pass
+ texts=[_search_text(x) for x in items]
+ fp=str(hash(tuple(texts)))
+ if _VEC['fp']==fp: return _VEC['idf'],_VEC['docs']
+ N=len(texts); df={}
+ docs=[]
+ for t in texts:
+  toks=_tok(t); docs.append(toks)
+  for term in set(toks): df[term]=df.get(term,0)+1
+ idf={t:math.log((N+1)/(d+1))+1 for t,d in df.items()}
+ vecs=[_tfidf(docs[i],idf) for i in range(N)]
+ _VEC.update(fp=fp,idf=idf,docs=vecs)
+ return idf,vecs
+def _vector_recall(query,items,topk=30):
+ try:
+  idf,vecs=_vector_index(items)
+  qv=_tfidf(_tok(query or ''),idf)
+  scored=[(_cos(qv,vecs[i]),items[i]['path']) for i in range(len(vecs))]
+  scored.sort(key=lambda x:x[0],reverse=True)
+  return [p for s,p in scored[:topk] if s>0], scored
+ except Exception:
+  return [], []
+
+def split_query_terms(query):
+ return _tok(query)
 def natural_search(query):
- import urllib.request
+ import urllib.request, urllib.error
  cfg=get_settings(True); key=cfg.get('apiKey','')
  if not key: raise ValueError('尚未配置 DeepSeek API Key')
- prompt=('理解用户想找哪类下载包，并扩展相关的中文/英文词、常见产品名。只返回严格JSON。字段：'
-  'terms为可选同义词数组（任意一个命中即可，例如数据库应扩展为database、mysql、postgresql、sql server、oracle、redis、mongodb、navicat）；'
-  'recommendations数组、kinds数组、minSizeMB、maxSizeMB、minAgeDays、maxAgeDays、suspicious、mediaDirectory。'
-  '不要把“我要、找、查、帮我”等口语放进terms。用户查询：'+str(query))
- body=json.dumps({'model':cfg['model'],'messages':[{'role':'user','content':prompt}],
-  'temperature':0,'response_format':{'type':'json_object'}}).encode()
- req=urllib.request.Request(cfg['baseUrl']+'/chat/completions',data=body,
-  headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
- response=json.loads(urllib.request.urlopen(req,timeout=30).read().decode('utf-8'))
- content=response['choices'][0]['message']['content'].strip(); match=re.search(r'\{.*\}',content,re.S)
- if not match: raise ValueError('模型没有返回可解析的搜索条件')
- criteria=json.loads(match.group(0)); matches=[]
  with LOCK: items=list(CACHE.get('items',[]))
- terms=[str(x).lower() for x in criteria.get('terms',[]) if str(x).strip()]
- active=lambda k: k in criteria and criteria[k] not in (None,'',[])
- has_structured=any(active(k) for k in ('recommendations','kinds','minSizeMB','maxSizeMB','minAgeDays','maxAgeDays','suspicious','mediaDirectory'))
- for item in items:
-  text=' '.join([item.get('name',''),item.get('displayName',''),item.get('path',''),item.get('kind',''),
-   (item.get('aiDescription') or {}).get('summary',''),item.get('recommendation','')]).lower()
-  term_match=any(t in text for t in terms) if terms else False
-  structured_match=has_structured
-  if criteria.get('recommendations') and item.get('recommendation') not in criteria['recommendations']: structured_match=False
-  if criteria.get('kinds') and not any(str(k) in item.get('kind','') for k in criteria['kinds']): structured_match=False
-  mb=item.get('size',0)/1048576; age=item.get('ageDays',0)
-  if active('minSizeMB') and mb<float(criteria['minSizeMB']): structured_match=False
-  if active('maxSizeMB') and mb>float(criteria['maxSizeMB']): structured_match=False
-  if active('minAgeDays') and age<float(criteria['minAgeDays']): structured_match=False
-  if active('maxAgeDays') and age>float(criteria['maxAgeDays']): structured_match=False
-  if active('suspicious') and bool(item.get('suspicious'))!=bool(criteria['suspicious']): structured_match=False
-  if active('mediaDirectory') and bool(item.get('mediaDirectory'))!=bool(criteria['mediaDirectory']): structured_match=False
-  # LLM semantic result is the union of synonym hits and structured filter hits.
-  if term_match or structured_match: matches.append(item['path'])
- return {'paths':matches,'criteria':criteria,'terms':terms}
+ texts=[_search_text(x) for x in items]
+ terms=split_query_terms(query)
+ base=(cfg.get('baseUrl') or 'https://api.deepseek.com').strip().rstrip('/')
+ model=cfg.get('model') or 'deepseek-v4-flash'
+ def call_llm(prompt):
+  body=json.dumps({'model':model,'messages':[{'role':'user','content':prompt}],'temperature':0,'response_format':{'type':'json_object'}}).encode()
+  req=urllib.request.Request(base+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
+  raw=urllib.request.urlopen(req,timeout=30).read().decode('utf-8')
+  content=json.loads(raw)['choices'][0]['message']['content'].strip()
+  m=re.search(r'\{.*\}',content,re.S)
+  if not m: raise ValueError('模型没有返回可解析的搜索条件')
+  return json.loads(m.group(0))
+ # A) 本地切词模糊召回
+ local_paths=[items[i]['path'] for i in range(len(items)) if any(t in texts[i] for t in terms)]
+ # B) 向量召回（查询→向量→cosine）
+ def score_lex(i):
+  name=items[i].get('name','').lower()
+  return 2*sum(1 for t in terms if t in texts[i]) + sum(1 for t in terms if t in name)
+ vec_paths=[]
+ try:
+  vec_paths,_= _vector_recall(query, items, 30)
+ except Exception: pass
+ # 候选：词法打分 top30 与向量 top30 取并
+ lex_rank=sorted(range(len(items)), key=score_lex, reverse=True)
+ cand=[]
+ for i in lex_rank[:30]:
+  if score_lex(i)>0:
+   cand.append(i)
+ cand_set=set(cand)
+ if vec_paths:
+  pmap={items[i]['path']:i for i in range(len(items))}
+  for p in vec_paths:
+   i=pmap.get(p)
+   if i is not None and i not in cand_set:
+    cand_set.add(i); cand.append(i)
+ cand=[i for i in cand if i<len(items)]
+ llm_paths=set(); parsed={}
+ if cand:
+  lines=[]
+  for n,i in enumerate(cand):
+   info=(items[i].get('aiDescription') or {}).get('summary','')
+   lines.append('%d. %s｜%s' % (n, items[i].get('name',''), info))
+  prompt=('是一款“下载包管家”应用，要从本机缓存的下载包里找出用户关心的那类。\n'
+    '用户查询：'+str(query)+'\n'
+    '已从缓存召回候选（编号. 包名｜说明）：\n'+'\n'.join(lines)+'\n'
+    '请只返回严格 JSON：{"relevant":[候选编号数组],"extra_terms":[能继续扩大召回的相关中英文词、常见产品名数组]}。'
+    'relevant 从上面的候选编号里挑与用户意图相关的；extra_terms 没有就返回空数组。')
+  parsed=call_llm(prompt)
+  if isinstance(parsed.get('relevant'),list):
+   for idx in parsed['relevant']:
+    try:
+     i=cand[int(idx)]
+     if 0<=i<len(items): llm_paths.add(items[i]['path'])
+    except (ValueError,IndexError,TypeError): pass
+  if isinstance(parsed.get('paths'),list):
+   for ppp in parsed['paths']:
+    if ppp: llm_paths.add(str(ppp))
+  extra=[str(x) for x in (parsed.get('extra_terms') or []) if str(x).strip() and str(x).lower() not in _STOP]
+ else:
+  prompt=('理解用户想找哪类下载包，并扩展相关的中文/英文词、常见产品名。只返回严格JSON。字段：'
+    'terms为可选同义词数组（任意一个命中即可）、recommendations数组、kinds数组、minSizeMB、maxSizeMB、minAgeDays、maxAgeDays、suspicious、mediaDirectory。'
+    '用户查询：'+str(query))
+  parsed=call_llm(prompt)
+  extra=[str(x) for x in (parsed.get('terms') or []) if str(x).strip() and str(x).lower() not in _STOP]
+ all_terms=terms+extra
+ for i in range(len(items)):
+  if any(t in texts[i] for t in all_terms): llm_paths.add(items[i]['path'])
+ # 并集 = 切词模糊 ∪ 向量召回 ∪ LLM(相关候选+扩词)
+ result=set(local_paths)|set(vec_paths)|llm_paths
+ return {'paths':sorted(result),'criteria':parsed,'terms':all_terms,'candidates':len(cand),'vec':len(vec_paths)}
 
 def media_file_kind(p):
  ext=p.suffix.lower()
@@ -158,31 +263,84 @@ def save_json_file(file, value):
  file.parent.mkdir(parents=True,exist_ok=True); tmp=file.with_suffix(file.suffix+'.tmp')
  tmp.write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding='utf-8'); os.replace(tmp,file)
 
+def _dpapi(raw, protect=True):
+ from ctypes import wintypes
+ class BLOB(ctypes.Structure):
+  _fields_=[('cbData',wintypes.DWORD),('pbData',ctypes.POINTER(ctypes.c_char))]
+ raw=raw if isinstance(raw,bytes) else str(raw).encode('utf-8')
+ if not raw: return b''
+ buf=ctypes.create_string_buffer(raw,len(raw))
+ src=BLOB(len(raw),ctypes.cast(buf,ctypes.POINTER(ctypes.c_char))); dst=BLOB()
+ fn=ctypes.windll.crypt32.CryptProtectData if protect else ctypes.windll.crypt32.CryptUnprotectData
+ if not fn(ctypes.byref(src),None,None,None,None,0,ctypes.byref(dst)): raise RuntimeError('系统加密接口调用失败')
+ try: return ctypes.string_at(dst.pbData,dst.cbData)
+ finally: ctypes.windll.kernel32.LocalFree(dst.pbData)
+
+def protect_key(key):
+ try: return _dpapi(str(key),True).hex()
+ except Exception: return ''
+
+def unprotect_key(token):
+ try: return _dpapi(bytes.fromhex(str(token or '')),False).decode('utf-8')
+ except Exception: return ''
+
 def get_settings(reveal=False):
- cfg={'apiKey':'','baseUrl':'https://api.deepseek.com','model':'deepseek-v4-flash','autoSearch':True}
+ cfg={'baseUrl':'https://api.deepseek.com','model':'deepseek-v4-flash','autoSearch':True,'destination':''}
  cfg.update(load_json_file(SETTINGS_FILE,{}))
+ key=unprotect_key(cfg.get('apiKeyEnc')) or str(cfg.get('apiKey') or '')
  if not reveal:
-  key=cfg.get('apiKey',''); cfg['apiKeyMasked']=('••••'+key[-4:]) if key else ''; cfg['apiKey']=''
- return cfg
+  cfg['apiKeyMasked']=('••••'+key[-4:]) if key else ''; cfg['apiKey']=''
+  return cfg
+ cfg['apiKey']=key; return cfg
 
 def save_settings(data):
  old=get_settings(True); key=str(data.get('apiKey','')).strip()
- if key: old['apiKey']=key
+ if data.get('clearApiKey'): old['apiKey']=''
+ elif key: old['apiKey']=key
  old['baseUrl']=str(data.get('baseUrl') or old['baseUrl']).strip().rstrip('/')
- old['model']=str(data.get('model') or old['model']).strip(); old['autoSearch']=bool(data.get('autoSearch',True))
+ old['model']=str(data.get('model') or old['model']).strip()
+ old['autoSearch']=bool(data.get('autoSearch',old.get('autoSearch',True)))
+ old['destination']=str(data.get('destination') or old.get('destination') or '').strip()
+ plain=old.pop('apiKey','') or ''
+ old.pop('apiKeyMasked',None); old.pop('apiKeyEnc',None)
+ if plain: old['apiKeyEnc']=protect_key(plain)
  save_json_file(SETTINGS_FILE,old); return get_settings(False)
 
-def item_fingerprint(item): return '|'.join([item['name'].lower(),str(item['size']),item['modified']])
-
-def web_search_snippets(query):
- import urllib.request
- url='https://www.google.com/search?q='+urllib.parse.quote(query)
- req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0'})
+def test_connection(baseUrl=None, model=None, apiKey=None):
+ import urllib.request, urllib.error, time
+ cfg=get_settings(True)
+ base=str(baseUrl or cfg.get('baseUrl') or 'https://api.deepseek.com').strip().rstrip('/')
+ model=str(model or cfg.get('model','')).strip()
+ key=str(apiKey or '').strip() or cfg.get('apiKey','')
+ if not key: return {'ok':False,'error':'尚未配置 DeepSeek API Key，请先填写并保存'}
+ def chat_check():
+  body=json.dumps({'model':model,'messages':[{'role':'user','content':'回复ok'}],'max_tokens':4}).encode()
+  req=urllib.request.Request(base+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
+  return urllib.request.urlopen(req,timeout=15)
+ t0=time.time()
  try:
-  html=urllib.request.urlopen(req,timeout=12).read().decode('utf-8','ignore')
-  html=re.sub(r'<script.*?</script>|<style.*?</style>',' ',html,flags=re.I|re.S)
-  return re.sub(r'\s+',' ',re.sub(r'<[^>]+>',' ',html))[:6000]
- except Exception as e: return '联网搜索失败：'+str(e)
+  req=urllib.request.Request(base+'/models',headers={'Authorization':'Bearer '+key})
+  resp=urllib.request.urlopen(req,timeout=15)
+  data=json.loads(resp.read().decode('utf-8'))
+  ms=[m.get('id') for m in data.get('data',[]) if isinstance(m,dict)]
+  latency=int((time.time()-t0)*1000)
+  model_ok=(model in ms) if ms else True
+  return {'ok':True,'latencyMs':latency,'endpoint':base,'model':model,'availableModels':ms,'modelOk':model_ok}
+ except urllib.error.HTTPError as e:
+  code=e.code; msg=e.read().decode('utf-8','ignore')[:300]
+  if code==404:
+   try:
+    t0=time.time(); chat_check(); latency=int((time.time()-t0)*1000)
+    return {'ok':True,'latencyMs':latency,'endpoint':base,'model':model,'via':'chat/completions','modelOk':True}
+   except urllib.error.HTTPError as e2:
+    return {'ok':False,'error':'HTTP %s：%s'%(e2.code,e2.read().decode('utf-8','ignore')[:300]),'endpoint':base}
+   except Exception as e2:
+    return {'ok':False,'error':str(e2),'endpoint':base}
+  return {'ok':False,'error':'HTTP %s：%s'%(code,msg),'endpoint':base}
+ except Exception as e:
+  return {'ok':False,'error':str(e),'endpoint':base}
+
+def item_fingerprint(item): return '|'.join([item['name'].lower(),str(item['size']),item['modified']])
 
 def deepseek_description(item):
  import urllib.request
@@ -257,24 +415,45 @@ def classify_collection(p):
  result=json.loads(content)
  return {'isCollection':bool(result.get('isCollection')),'reason':str(result.get('reason',''))[:30]}
 
+def collection_prejudge(p):
+ """本地零成本预判，避免为显然不是集合的目录花掉 AI 调用。"""
+ try: kids=list(p.iterdir())
+ except OSError: return {'isCollection':False,'reason':'目录不可读'}
+ if len(kids)<2: return {'isCollection':False,'reason':'子项不足，不展开'}
+ packs=[k for k in kids if k.is_file() and k.suffix.lower() in PACK]
+ if len(packs)>=2 and len(packs)/len(kids)>=0.6: return {'isCollection':True,'reason':'多个独立安装包'}
+ install={'.dll','.lib','.pdb','.so','.dat','.pak'}
+ if any(k.is_file() and k.suffix.lower() in install for k in kids): return {'isCollection':False,'reason':'安装目录内容'}
+ return None
+
 def classify_first_level(children):
- cache=load_json_file(COLLECTION_CACHE_FILE,{})
- folders=[p for p in children if p.is_dir()]; results={}; pending=[]
+ cache=load_json_file(COLLECTION_CACHE_FILE,{}); fails=load_json_file(COLLECTION_FAIL_FILE,{})
+ now=time.time(); folders=[p for p in children if p.is_dir()]; results={}; pending=[]
  for p in folders:
+  hint=collection_prejudge(p)
+  if hint is not None: results[str(p)]=hint; continue
   sig=collection_signature(p)
-  if sig in cache: results[str(p)]=cache[sig]
-  else: pending.append((p,sig))
- from concurrent.futures import ThreadPoolExecutor,as_completed
- with ThreadPoolExecutor(max_workers=min(10,len(pending) or 1)) as pool:
-  futures={pool.submit(classify_collection,p):(p,sig) for p,sig in pending}
-  for future in as_completed(futures):
-   p,sig=futures[future]
-   try:
-    value=future.result(); results[str(p)]=value
-    # Do not persist transient API/key failures as a permanent decision.
-    if not value.get('reason','').startswith(('未配置','目录不可读')): cache[sig]=value
-   except Exception as e: results[str(p)]={'isCollection':False,'reason':'AI判断失败，暂不展开：'+str(e)[:80]}
- if pending: save_json_file(COLLECTION_CACHE_FILE,cache)
+  if sig in cache: results[str(p)]=cache[sig]; continue
+  if now-fails.get(sig,0)<AI_FAIL_TTL:
+   results[str(p)]={'isCollection':False,'reason':'AI 暂不可用，先不展开'}; continue
+  pending.append((p,sig))
+ failed=False
+ if pending:
+  from concurrent.futures import ThreadPoolExecutor,as_completed
+  done=0; set_progress('AI 判断集合目录',0,len(pending))
+  with ThreadPoolExecutor(max_workers=min(10,len(pending) or 1)) as pool:
+   futures={pool.submit(classify_collection,p):(p,sig) for p,sig in pending}
+   for future in as_completed(futures):
+    p,sig=futures[future]; done+=1; set_progress('AI 判断集合目录',done,len(pending))
+    try:
+     value=future.result(); results[str(p)]=value
+     # Do not persist transient API/key failures as a permanent decision.
+     if not value.get('reason','').startswith(('未配置','目录不可读')): cache[sig]=value
+    except Exception as e:
+     results[str(p)]={'isCollection':False,'reason':'AI判断失败，暂不展开：'+str(e)[:80]}
+     fails[sig]=now; failed=True
+  save_json_file(COLLECTION_CACHE_FILE,cache)
+  if failed: save_json_file(COLLECTION_FAIL_FILE,fails)
  return results
 
 def load_labels():
@@ -284,16 +463,31 @@ def load_labels():
  except (OSError,json.JSONDecodeError): return {}
 
 def save_keep(paths):
- labels=load_labels(); now=datetime.now().isoformat(timespec='seconds')
+ labels=load_labels(); now=datetime.now().isoformat(timespec='seconds'); marked=[]; base=roots()
  for x in paths:
   p=Path(x)
-  if not allowed(p) or not p.exists(): continue
-  labels[str(p.resolve()).lower()]={'label':'keep','markedAt':now,'path':str(p)}
- tmp=LABELS_FILE.with_suffix('.tmp')
- tmp.write_text(json.dumps(labels,ensure_ascii=False,indent=2),encoding='utf-8'); os.replace(tmp,LABELS_FILE)
- return [v['path'] for v in labels.values() if v.get('label')=='keep']
+  if not allowed(p,base) or not p.exists(): continue
+  labels[str(p.resolve()).lower()]={'label':'keep','markedAt':now,'path':str(p)}; marked.append(str(p.resolve()))
+ if marked:
+  tmp=LABELS_FILE.with_suffix('.tmp')
+  tmp.write_text(json.dumps(labels,ensure_ascii=False,indent=2),encoding='utf-8'); os.replace(tmp,LABELS_FILE)
+ return marked
 
 def scan(force=False):
+ if SCAN_LOCK.acquire(blocking=False):
+  try: return _scan_impl(force)
+  finally: set_progress(''); SCAN_LOCK.release()
+ with LOCK: cached=dict(CACHE) if CACHE.get('items') else None
+ if cached:
+  cached.pop('at',None); return cached
+ SCAN_LOCK.acquire()
+ try:
+  snap=load_json_file(SNAPSHOT_FILE,None)
+  if isinstance(snap,dict) and isinstance(snap.get('items'),list): return snap
+  return _scan_impl(False)
+ finally: set_progress(''); SCAN_LOCK.release()
+
+def _scan_impl(force=False):
  if not force:
   snap=load_json_file(SNAPSHOT_FILE,None)
   if isinstance(snap,dict) and isinstance(snap.get('items'),list) and snap.get('generatedAt'):
@@ -303,7 +497,7 @@ def scan(force=False):
     data={'generatedAt':snap['generatedAt'],'items':snap['items'],'roots':snap.get('roots',[]),'errors':snap.get('errors',[])}
     with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
     return data
- rr=roots(); out=[]; errors=[]; labels=load_labels(); ai_cache=load_json_file(AI_CACHE_FILE,{}); old_inventory=load_json_file(INVENTORY_FILE,[]); baseline=not INVENTORY_FILE.exists()
+ set_progress('枚举扫描目录'); rr=roots(); out=[]; errors=[]; labels=load_labels(); ai_cache=load_json_file(AI_CACHE_FILE,{}); old_inventory=set(load_json_file(INVENTORY_FILE,[])); baseline=not INVENTORY_FILE.exists()
  def add_item(p,root,collection=None,collection_reason='',media_kind=''):
   try:
    size,files,dirs,newest,hints,errs=summary(p); newest=newest or p.stat().st_mtime
@@ -321,7 +515,8 @@ def scan(force=False):
    fp=item_fingerprint(item); item['fingerprint']=fp; item['aiDescription']=({'summary':media_kind,'model':'本地媒体识别'} if media_kind else ai_cache.get(fp)); item['isNew']=False if baseline else fp not in old_inventory
    out.append(item)
   except OSError as e: errors.append(str(e))
- for root in rr:
+ for ri,root in enumerate(rr,1):
+  set_progress('统计目录内容',ri,len(rr))
   try: children=list(root.iterdir())
   except OSError as e: errors.append(str(e)); continue
   media_kinds={str(p):media_directory_kind(p) for p in children if p.is_dir()}
@@ -341,16 +536,17 @@ def scan(force=False):
      member_media=media_directory_kind(member) if member.is_dir() else ''
      add_item(member,root,p.name,decision.get('reason','多个下载包的集合'),member_media)
    else: add_item(p,root)
+ set_progress('保存扫描结果')
  save_json_file(INVENTORY_FILE,[item_fingerprint(x) for x in out])
- data={'generatedAt':datetime.now().isoformat(timespec='seconds'),'items':out,'roots':[str(x) for x in rr],'errors':errors}
+ data={'generatedAt':datetime.now().isoformat(timespec='seconds'),'items':out,'roots':[str(x) for x in rr],'errors':errors,'version':APP_VERSION}
  save_json_file(SNAPSHOT_FILE,data)
  with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
  return data
 
-def allowed(p):
+def allowed(p,root_list=None):
  try:
   resolved=p.resolve()
-  for root in roots():
+  for root in (root_list if root_list is not None else roots()):
    try:
     rel=resolved.relative_to(root.resolve())
     if len(rel.parts) in (1,2): return True
@@ -358,9 +554,9 @@ def allowed(p):
   return False
  except OSError: return False
 
-
 def recycle(paths):
- safe=[str(Path(x).resolve()) for x in paths if allowed(Path(x)) and Path(x).exists()]
+ base=roots()
+ safe=[str(Path(x).resolve()) for x in paths if allowed(Path(x),base) and Path(x).exists()]
  if not safe: return []
  # Native Windows Shell API: FO_DELETE with FOF_ALLOWUNDO sends items to Recycle Bin.
  import ctypes
@@ -378,17 +574,23 @@ def recycle(paths):
 def move(paths,dest):
  d=Path(dest)
  if not d.is_absolute(): raise ValueError('目标目录必须是绝对路径')
- d.mkdir(parents=True,exist_ok=True); done=[]
+ d.mkdir(parents=True,exist_ok=True); done=[]; failed=[]; base=roots()
  for x in paths:
   p=Path(x)
-  if not allowed(p) or not p.exists(): continue
-  target=d/p.name
-  if target.exists(): raise FileExistsError('目标已存在：'+str(target))
-  shutil.move(str(p),str(target)); done.append({'from':str(p),'to':str(target)})
- return done
+  try:
+   if not allowed(p,base) or not p.exists(): failed.append({'path':str(p),'error':'不在扫描范围内或已不存在'}); continue
+   target=d/p.name
+   if target.exists(): failed.append({'path':str(p),'error':'目标已存在，跳过'}); continue
+   shutil.move(str(p),str(target)); done.append({'from':str(p),'to':str(target)})
+  except OSError as e: failed.append({'path':str(p),'error':str(e)})
+ return {'done':done,'failed':failed}
 
 class H(SimpleHTTPRequestHandler):
- def translate_path(self,path): return str(APP/(urllib.parse.urlparse(path).path.lstrip('/') or 'index.html'))
+ def translate_path(self,path):
+  rel=urllib.parse.urlparse(path).path.lstrip('/') or 'index.html'
+  try: target=(APP/rel).resolve(); target.relative_to(APP.resolve())
+  except (ValueError,OSError): return str(APP/'index.html')
+  return str(target)
  def sendj(self,o,status=200):
   b=json.dumps(o,ensure_ascii=False).encode(); self.send_response(status); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)
  def do_GET(self):
