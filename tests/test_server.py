@@ -2,7 +2,7 @@
 """下载包管家 - server 纯逻辑单元测试（stdlib unittest，无需额外依赖）。
 运行：python -m unittest discover -s tests -v
 """
-import io, json, os, sys, tempfile, unittest, urllib.error
+import io, json, os, sys, tempfile, unittest, urllib.error, urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -18,7 +18,7 @@ class TempApp(unittest.TestCase):
         self._saved = {}
         for name in ('SETTINGS_FILE', 'LABELS_FILE', 'SNAPSHOT_FILE', 'INVENTORY_FILE',
                      'AI_CACHE_FILE', 'COLLECTION_CACHE_FILE', 'COLLECTION_FAIL_FILE',
-                     'MANUAL_ROOTS_FILE', 'NOTES_FILE'):
+                     'MANUAL_ROOTS_FILE', 'NOTES_FILE', 'IGNORE_FILE'):
             self._saved[name] = getattr(server, name)
             setattr(server, name, self.dir / (name.lower() + '.json'))
         self._roots = server.roots
@@ -339,6 +339,126 @@ class TestKeyFormat(unittest.TestCase):
         msg = server._llm_error(err, bad)
         self.assertIn('5555', msg)
         self.assertIn('UUID', msg)
+
+
+class TestIgnore(TempApp):
+    """忽略名单：按项目名称记住，扫描时自动跳过，也能撤销。"""
+
+    def test_add_and_list(self):
+        r = server.add_ignore(u'某个包.7z', r'D:\Downloads\某个包.7z')
+        self.assertEqual(r['total'], 1)
+        recs = server.load_ignore()
+        self.assertEqual(recs[0]['name'], u'某个包.7z')
+        self.assertTrue(recs[0]['addedAt'], u'应该记录加入时间')
+
+    def test_add_is_case_insensitive_and_deduped(self):
+        server.add_ignore('Foo.zip')
+        server.add_ignore('foo.ZIP')
+        self.assertEqual(len(server.load_ignore()), 1)
+
+    def test_blank_name_rejected(self):
+        with self.assertRaises(ValueError):
+            server.add_ignore('   ')
+
+    def test_is_ignored_by_name_or_path(self):
+        server.add_ignore('foo.zip', r'D:\Downloads\foo.zip')
+        self.assertTrue(server.is_ignored(Path(r'D:\Elsewhere\FOO.ZIP')))
+        self.assertTrue(server.is_ignored(Path(r'D:\Downloads\foo.zip')))
+        self.assertFalse(server.is_ignored(Path(r'D:\Downloads\bar.zip')))
+
+    def test_remove_ignore(self):
+        server.add_ignore('foo.zip')
+        self.assertTrue(server.remove_ignore('FOO.ZIP')['removed'])
+        self.assertFalse(server.is_ignored(Path('foo.zip')))
+        self.assertFalse(server.remove_ignore('nothing.zip')['removed'])
+
+    def test_finalize_drops_ignored_items(self):
+        server.add_ignore('foo.zip')
+        data = {'items': [{'name': 'foo.zip', 'path': r'D:\a\foo.zip'},
+                          {'name': 'bar.zip', 'path': r'D:\a\bar.zip'}]}
+        out = server._finalize(data)
+        self.assertEqual([x['name'] for x in out['items']], ['bar.zip'])
+        self.assertEqual(out['items'][0]['note'], '', u'保留项仍要附带备注字段')
+
+    def test_handwritten_snapshot_with_string_names(self):
+        server.IGNORE_FILE.write_text(json.dumps({'names': ['foo.zip']}), encoding='utf-8')
+        data = {'items': [{'name': 'FOO.ZIP', 'path': r'D:\a\FOO.ZIP'}]}
+        self.assertEqual(server._finalize(data)['items'], [])
+
+
+class TestIgnoreDuringScan(TempApp):
+    """重新扫描时直接跳过被忽略的项目，旧快照里的也要过滤掉。"""
+
+    def setUp(self):
+        super().setUp()
+        self.root = self.dir / 'Downloads'
+        self.root.mkdir()
+        (self.root / 'keepme.zip').write_bytes(b'x' * 10)
+        (self.root / 'ignoredme.zip').write_bytes(b'x' * 10)
+        self._classify = server.classify_first_level
+        server.classify_first_level = lambda items: {}
+        server.roots = lambda: [self.root]
+
+    def tearDown(self):
+        server.classify_first_level = self._classify
+        super().tearDown()
+
+    def test_ignored_name_skipped_on_rescan(self):
+        server.add_ignore('ignoredme.zip')
+        names = [x['name'] for x in server.scan(True)['items']]
+        self.assertIn('keepme.zip', names)
+        self.assertNotIn('ignoredme.zip', names)
+
+    def test_stale_cached_snapshot_is_cleaned(self):
+        data = {'generatedAt': '2026-01-01T00:00:00', 'roots': [str(self.root)], 'errors': [],
+                'items': [{'name': 'ignoredme.zip', 'path': str(self.root / 'ignoredme.zip')},
+                          {'name': 'keepme.zip', 'path': str(self.root / 'keepme.zip')}]}
+        server.save_json_file(server.SNAPSHOT_FILE, data)
+        server.CACHE.clear()
+        server.add_ignore('ignoredme.zip')
+        names = [x['name'] for x in server.scan(False)['items']]
+        self.assertNotIn('ignoredme.zip', names)
+
+
+class TestConnectionProbe(TempApp):
+    """回归：401 分支用过未定义的 tail，界面会显示 name 'tail' is not defined。"""
+
+    def setUp(self):
+        super().setUp()
+        self.env = FakeEnv()
+        self._set_env = server.set_user_env_key
+        self._env_key = server.env_api_key
+        server.set_user_env_key = self.env
+        server.env_api_key = lambda: self.env.stored.get(server.ENV_KEY_NAME, '')
+        self._urlopen = urllib.request.urlopen
+
+    def tearDown(self):
+        urllib.request.urlopen = self._urlopen
+        server.set_user_env_key = self._set_env
+        server.env_api_key = self._env_key
+        super().tearDown()
+
+    def _raise_401(self, req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 401, 'Unauthorized', {},
+                                     io.BytesIO(b'{"error":{"message":"Authentication Fails"}}'))
+
+    def test_401_returns_friendly_message_not_nameerror(self):
+        self.env.stored[server.ENV_KEY_NAME] = '11111111-2222-3333-4444-555555555555'
+        urllib.request.urlopen = self._raise_401
+        out = server.test_connection()
+        self.assertFalse(out['ok'])
+        self.assertNotIn('is not defined', out['error'])
+        self.assertIn('5555', out['error'])
+        self.assertIn('UUID', out['error'])
+        self.assertEqual(out['keyTail'], '5555')
+
+    def test_401_with_good_looking_key_asks_to_refill(self):
+        self.env.stored[server.ENV_KEY_NAME] = 'sk-' + 'a' * 32
+        urllib.request.urlopen = self._raise_401
+        out = server.test_connection()
+        self.assertFalse(out['ok'])
+        self.assertIn('aaaa', out['error'])
+        self.assertIn(u'模型设置', out['error'])
 
 
 if __name__ == '__main__':

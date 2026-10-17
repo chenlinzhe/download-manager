@@ -26,3 +26,15 @@ secrets.json
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# ---- 运行期数据（从源码运行时写在仓库目录，勿提交）----
+ignore.json
+inventory.json
+inventory_snapshot.json
+ai_descriptions.json
+collection_classifications.json
+collection_failures.json
+user_labels.json
+user_notes.json
+manual_roots.json
+*.tmp

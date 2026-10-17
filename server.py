@@ -8,8 +8,8 @@ if getattr(__import__('sys'),'frozen',False):
  APP=Path(os.environ.get('LOCALAPPDATA',Path.home()))/'DownloadPackageManager'
  APP.mkdir(parents=True,exist_ok=True)
 LABELS_FILE=APP/'user_labels.json'
-SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; SCAN_TTL_DAYS=7
-APP_VERSION='1.2'
+SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
+APP_VERSION='1.3'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -406,7 +406,8 @@ def test_connection(baseUrl=None, model=None, apiKey=None):
  model=str(model or cfg.get('model','')).strip()
  key=str(apiKey or '').strip() or cfg.get('apiKey','')
  if not key: return {'ok':False,'error':'尚未配置 DeepSeek API Key，请先填写并保存'}
- probe={'keyTail':key_tail(key),'keyLength':len(key),'keySource':('input' if str(apiKey or '').strip() else (cfg.get('keySource') or ''))}
+ tail=key_tail(key)
+ probe={'keyTail':tail,'keyLength':len(key),'keySource':('input' if str(apiKey or '').strip() else (cfg.get('keySource') or ''))}
  def chat_check():
   body=json.dumps({'model':model,'messages':[{'role':'user','content':'回复ok'}],'max_tokens':4}).encode()
   req=urllib.request.Request(base+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
@@ -592,6 +593,88 @@ def _with_notes(data):
   if isinstance(item,dict): item['note']=notes.get(str(item.get('path')),'')
  return data
 
+def load_ignore():
+ """读取忽略名单。按项目名称忽略（同时记录路径，便于在界面上展示）。"""
+ data=load_json_file(IGNORE_FILE,{})
+ names=data.get('names') if isinstance(data,dict) else None
+ if not isinstance(names,list): return []
+ out=[]
+ for r in names:
+  if isinstance(r,dict):
+   name=' '.join(str(r.get('name') or '').split())
+   if name: out.append({'name':name,'path':str(r.get('path') or ''),'addedAt':str(r.get('addedAt') or '')})
+  elif isinstance(r,str) and r.strip(): out.append({'name':r.strip(),'path':'','addedAt':''})
+ return out
+
+def save_ignore(records):
+ recs=[]
+ for r in records or []:
+  raw=(r or {}).get('name') if isinstance(r,dict) else r
+  name=' '.join(str(raw or '').split())
+  if not name: continue
+  recs.append({'name':name,
+               'path':str(r.get('path') or '') if isinstance(r,dict) else '',
+               'addedAt':str(r.get('addedAt') or '') if isinstance(r,dict) else ''})
+ tmp=IGNORE_FILE.with_suffix('.tmp')
+ tmp.parent.mkdir(parents=True,exist_ok=True)
+ tmp.write_text(json.dumps({'names':recs},ensure_ascii=False,indent=2),encoding='utf-8'); os.replace(tmp,IGNORE_FILE)
+ return recs
+
+def add_ignore(name, path=''):
+ """把一个项目名称加入忽略名单；以后扫描会自动跳过同名项目。"""
+ name=' '.join(str(name or '').split())
+ if not name: raise ValueError('缺少项目名称')
+ recs=[r for r in load_ignore() if r['name'].lower()!=name.lower()]
+ recs.append({'name':name,'path':str(path or ''),'addedAt':datetime.now().isoformat(timespec='seconds')})
+ save_ignore(recs)
+ return {'name':name,'total':len(recs)}
+
+def remove_ignore(name):
+ target=' '.join(str(name or '').split()).lower()
+ recs=load_ignore(); kept=[r for r in recs if r['name'].lower()!=target]
+ if len(kept)==len(recs): return {'name':name,'removed':False,'total':len(recs)}
+ save_ignore(kept)
+ return {'name':name,'removed':True,'total':len(kept)}
+
+def ignore_sets():
+ """返回 (忽略的名称集合, 忽略的路径集合)，都转小写便于比较。"""
+ names=set(); paths=set()
+ for r in load_ignore():
+  n=str(r.get('name') or '').strip().lower()
+  if n: names.add(n)
+  p=str(r.get('path') or '').strip().lower()
+  if p: paths.add(p)
+ return names, paths
+
+def is_ignored(p, names=None, paths=None):
+ """这个项目是否在忽略名单里（按名称或路径）。"""
+ if names is None or paths is None: names,paths=ignore_sets()
+ if not names and not paths: return False
+ try:
+  if p.name.strip().lower() in names: return True
+ except (AttributeError,OSError): return False
+ try: return str(p).strip().lower() in paths
+ except OSError: return False
+
+def _drop_ignored(data):
+ """把忽略名单里的项目从结果中过滤掉（含沿用的旧快照）。"""
+ if not isinstance(data,dict) or not isinstance(data.get('items'),list): return data
+ names,paths=ignore_sets()
+ if not names and not paths: return data
+ kept=[]
+ for item in data['items']:
+  if isinstance(item,dict):
+   name=str(item.get('name') or '').strip().lower()
+   if name and name in names: continue
+   if str(item.get('path') or '').strip().lower() in paths: continue
+  kept.append(item)
+ if len(kept)!=len(data['items']): data['items']=kept
+ return data
+
+def _finalize(data):
+ """扫描结果统一出口：附加备注 + 过滤忽略名单。"""
+ return _drop_ignored(_with_notes(data))
+
 def save_keep(paths):
  labels=load_labels(); now=datetime.now().isoformat(timespec='seconds'); marked=[]; base=roots()
  for x in paths:
@@ -609,11 +692,11 @@ def scan(force=False):
   finally: set_progress(''); SCAN_LOCK.release()
  with LOCK: cached=dict(CACHE) if CACHE.get('items') else None
  if cached:
-  cached.pop('at',None); return _with_notes(cached)
+  cached.pop('at',None); return _finalize(cached)
  SCAN_LOCK.acquire()
  try:
   snap=load_json_file(SNAPSHOT_FILE,None)
-  if isinstance(snap,dict) and isinstance(snap.get('items'),list): return _with_notes(snap)
+  if isinstance(snap,dict) and isinstance(snap.get('items'),list): return _finalize(snap)
   return _scan_impl(False)
  finally: set_progress(''); SCAN_LOCK.release()
 
@@ -626,7 +709,7 @@ def _scan_impl(force=False):
    if 0<=age<SCAN_TTL_DAYS*86400:
     data={'generatedAt':snap['generatedAt'],'items':snap['items'],'roots':snap.get('roots',[]),'errors':snap.get('errors',[])}
     with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
-    return _with_notes(data)
+    return _finalize(data)
  set_progress('枚举扫描目录'); rr=roots(); out=[]; errors=[]; labels=load_labels(); ai_cache=load_json_file(AI_CACHE_FILE,{}); old_inventory=set(load_json_file(INVENTORY_FILE,[])); baseline=not INVENTORY_FILE.exists()
  def add_item(p,root,collection=None,collection_reason='',media_kind=''):
   try:
@@ -649,6 +732,8 @@ def _scan_impl(force=False):
   set_progress('统计目录内容',ri,len(rr))
   try: children=list(root.iterdir())
   except OSError as e: errors.append(str(e)); continue
+  ign_names,ign_paths=ignore_sets()
+  if ign_names or ign_paths: children=[p for p in children if not is_ignored(p,ign_names,ign_paths)]
   media_kinds={str(p):media_directory_kind(p) for p in children if p.is_dir()}
   decisions=classify_first_level([p for p in children if not media_kinds.get(str(p))])
   for p in children:
@@ -661,6 +746,7 @@ def _scan_impl(force=False):
    if p.is_dir() and decision.get('isCollection'):
     try: members=list(p.iterdir())
     except OSError as e: errors.append(str(e)); add_item(p,root); continue
+    if ign_names or ign_paths: members=[m for m in members if not is_ignored(m,ign_names,ign_paths)]
     for member in members:
      if member.is_file() and media_file_kind(member): continue
      member_media=media_directory_kind(member) if member.is_dir() else ''
@@ -671,7 +757,7 @@ def _scan_impl(force=False):
  data={'generatedAt':datetime.now().isoformat(timespec='seconds'),'items':out,'roots':[str(x) for x in rr],'errors':errors,'version':APP_VERSION}
  save_json_file(SNAPSHOT_FILE,data)
  with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
- return _with_notes(data)
+ return _finalize(data)
 
 def allowed(p,root_list=None):
  try:

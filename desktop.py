@@ -59,6 +59,15 @@ class Api:
  def move(self, paths, destination):
   try: return {'ok':True,'result':server.move(paths,destination)}
   except Exception as e: return {'ok':False,'error':str(e)}
+ def ignore(self, name, path=''):
+  try: return {'ok':True,'result':server.add_ignore(name,path)}
+  except Exception as e: return {'ok':False,'error':str(e)}
+ def unignore(self, name):
+  try: return {'ok':True,'result':server.remove_ignore(name)}
+  except Exception as e: return {'ok':False,'error':str(e)}
+ def ignored_list(self):
+  try: return {'ok':True,'result':server.load_ignore()}
+  except Exception as e: return {'ok':False,'error':str(e)}
 
 def fatal(text):
  try:
