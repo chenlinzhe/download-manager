@@ -9,7 +9,10 @@ if getattr(__import__('sys'),'frozen',False):
  APP.mkdir(parents=True,exist_ok=True)
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; SCAN_TTL_DAYS=7
-APP_VERSION='1.1'
+APP_VERSION='1.2'
+ENV_KEY_NAME='DEEPSEEK_API_KEY'
+DEFAULT_MODEL='deepseek-flash'
+MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
 AI_FAIL_TTL=1800
 SCAN_LOCK=threading.Lock()
 PROGRESS={'phase':'','done':0,'total':0,'at':0.0}
@@ -57,7 +60,7 @@ def open_path(path):
  else: subprocess.Popen(['explorer.exe','/select,',str(p)])
  return str(p)
 
-def _llm_error(e):
+def _llm_error(e, key='', model=''):
  """把 AI 调用异常翻译成用户能直接看懂的一句话。"""
  import urllib.error
  if isinstance(e,urllib.error.HTTPError):
@@ -67,10 +70,14 @@ def _llm_error(e):
   try:
    parsed=json.loads(body); text=str((parsed.get('error') or {}).get('message') or body)
   except Exception: pass
-  if e.code==401: return 'DeepSeek 认为 API Key 无效或已失效（HTTP 401）：请打开「模型设置」重新填写 Key，再点「测试连接」确认'
+  if e.code==401:
+   who=('，本次发送的 Key 尾号 '+key_tail(key)+'、共 %d 位'%len(key)) if key else ''
+   fmt=key_format_problem(key)
+   hint=(fmt+'。请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后填入「模型设置」') if fmt else '请打开「模型设置」重新填写 Key，再点「测试连接」确认'
+   return 'DeepSeek 认为 API Key 无效或已失效（HTTP 401）'+who+'：'+hint
   if e.code==402: return 'DeepSeek 账户余额不足（HTTP 402），请充值后再试'
   if e.code==403: return 'DeepSeek 拒绝访问（HTTP 403）：'+text[:120]
-  if e.code==404: return 'DeepSeek 接口地址或模型不存在（HTTP 404）：'+text[:120]
+  if e.code==404: return 'DeepSeek 接口地址或模型不存在（HTTP 404）：%s（当前用的模型：%s，请到「模型设置」点「测试连接」查看可用模型）'%(text[:120],model or '未设置')
   if e.code==429: return 'DeepSeek 触发限流（HTTP 429），请稍后再试'
   if e.code>=500: return 'DeepSeek 服务暂时不可用（HTTP %d），请稍后再试'%e.code
   return 'DeepSeek 返回错误（HTTP %d）：%s'%(e.code,text[:150])
@@ -146,12 +153,12 @@ def natural_search(query):
  texts=[_search_text(x) for x in items]
  terms=split_query_terms(query)
  base=(cfg.get('baseUrl') or 'https://api.deepseek.com').strip().rstrip('/')
- model=cfg.get('model') or 'deepseek-v4-flash'
+ model=cfg.get('model') or DEFAULT_MODEL
  def call_llm(prompt):
   body=json.dumps({'model':model,'messages':[{'role':'user','content':prompt}],'temperature':0,'response_format':{'type':'json_object'}}).encode()
   req=urllib.request.Request(base+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
   try: raw=urllib.request.urlopen(req,timeout=30).read().decode('utf-8')
-  except Exception as e: raise RuntimeError(_llm_error(e))
+  except Exception as e: raise RuntimeError(_llm_error(e,key,cfg.get('model')))
   content=json.loads(raw)['choices'][0]['message']['content'].strip()
   m=re.search(r'\{.*\}',content,re.S)
   if not m: raise ValueError('模型没有返回可解析的搜索条件')
@@ -306,27 +313,91 @@ def unprotect_key(token):
  try: return _dpapi(bytes.fromhex(str(token or '')),False).decode('utf-8')
  except Exception: return ''
 
+def key_tail(key):
+ """Key 尾号，用于在界面和报错里指认具体用的是哪一把 Key（不泄露完整 Key）。"""
+ k=str(key or '')
+ return k[-4:] if len(k)>=4 else ('' if not k else k)
+
+def key_format_problem(key):
+ """检查 Key 像不像 DeepSeek Key；正常返回空串，异常返回中文说明。"""
+ import re as _re
+ k=str(key or '').strip()
+ if not k: return ''
+ if _re.fullmatch(r'sk-[0-9A-Za-z]{32}',k): return ''
+ if _re.fullmatch(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',k):
+  return '这串内容是一个 UUID（通用唯一标识符），不是 DeepSeek API Key，多半是粘贴错了或被浏览器自动填充覆盖'
+ if not k.startswith('sk-'):
+  return '这串内容不以 sk- 开头，不是 DeepSeek API Key 的格式'
+ return '长度是 %d 位，而 DeepSeek Key 通常是 sk- 开头共 35 位'%len(k)
+
+def env_api_key():
+ """读本机环境变量里的 Key（推荐存放位置：不落盘、不进 Git）。"""
+ return str(os.environ.get(ENV_KEY_NAME) or '').strip()
+
+def set_user_env_key(value):
+ """把 Key 写进当前用户的 Windows 环境变量（HKCU\Environment）并同步当前进程。"""
+ import winreg
+ val=str(value or '').strip()
+ try:
+  with winreg.OpenKey(winreg.HKEY_CURRENT_USER,'Environment',0,winreg.KEY_SET_VALUE) as h:
+   if val: winreg.SetValueEx(h,ENV_KEY_NAME,0,winreg.REG_SZ,val)
+   else:
+    try: winreg.DeleteValue(h,ENV_KEY_NAME)
+    except FileNotFoundError: pass
+ except OSError:
+  return False
+ if val: os.environ[ENV_KEY_NAME]=val
+ else: os.environ.pop(ENV_KEY_NAME,None)
+ try:  # 广播设置变更，让新开的进程/资源管理器也能读到
+  res=ctypes.c_ulong()
+  ctypes.windll.user32.SendMessageTimeoutW(0xFFFF,0x001A,0,ctypes.c_wchar_p('Environment'),0x0002,3000,ctypes.byref(res))
+ except Exception: pass
+ return True
+
+def clear_user_env_key(): return set_user_env_key('')
+
 def get_settings(reveal=False):
- cfg={'baseUrl':'https://api.deepseek.com','model':'deepseek-v4-flash','autoSearch':True,'destination':''}
+ cfg={'baseUrl':'https://api.deepseek.com','model':DEFAULT_MODEL,'autoSearch':True,'destination':''}
  cfg.update(load_json_file(SETTINGS_FILE,{}))
- key=unprotect_key(cfg.get('apiKeyEnc')) or str(cfg.get('apiKey') or '')
+ cfg['model']=MODEL_ALIASES.get(str(cfg.get('model') or '').strip().strip(),str(cfg.get('model') or '').strip() or DEFAULT_MODEL)
+ file_key=unprotect_key(cfg.get('apiKeyEnc')) or str(cfg.get('apiKey') or '')
+ env_key=env_api_key()
+ key=env_key or file_key
+ cfg['keyName']=ENV_KEY_NAME
+ cfg['keySource']='env' if env_key else ('file' if file_key else '')
+ cfg['keyTail']=key_tail(key)
+ cfg['keyFormatProblem']=key_format_problem(key)
  if not reveal:
-  cfg['apiKeyMasked']=('••••'+key[-4:]) if key else ''; cfg['apiKey']=''
+  cfg['apiKeyMasked']=('••••'+cfg['keyTail']) if key else ''; cfg['apiKey']=''
   return cfg
  cfg['apiKey']=key; return cfg
 
+_DERIVED=('apiKey','apiKeyMasked','apiKeyEnc','keyName','keySource','keyTail','keyFormatProblem','keyStoredIn','keyWarning')
+
 def save_settings(data):
+ """保存设置。API Key 只写进本机环境变量，配置文件里不留任何 Key。"""
  old=get_settings(True); key=str(data.get('apiKey','')).strip()
- if data.get('clearApiKey'): old['apiKey']=''
- elif key: old['apiKey']=key
+ prev_enc=str(load_json_file(SETTINGS_FILE,{}).get('apiKeyEnc') or '')
+ existing=str(old.get('apiKey') or '')
+ stored=old.get('keySource') or ''
+ if data.get('clearApiKey'):
+  clear_user_env_key(); stored=''
+ elif key:
+  stored='env' if set_user_env_key(key) else 'file'
+ elif existing and stored=='file':
+  stored='env' if set_user_env_key(existing) else 'file'  # 老版本存在文件里的 Key，顺手迁移进环境变量
  old['baseUrl']=str(data.get('baseUrl') or old['baseUrl']).strip().rstrip('/')
  old['model']=str(data.get('model') or old['model']).strip()
  old['autoSearch']=bool(data.get('autoSearch',old.get('autoSearch',True)))
  old['destination']=str(data.get('destination') or old.get('destination') or '').strip()
- plain=old.pop('apiKey','') or ''
- old.pop('apiKeyMasked',None); old.pop('apiKeyEnc',None)
- if plain: old['apiKeyEnc']=protect_key(plain)
- save_json_file(SETTINGS_FILE,old); return get_settings(False)
+ for name in _DERIVED: old.pop(name,None)
+ if stored=='file':
+  token=protect_key(key) if key else prev_enc
+  if token: old['apiKeyEnc']=token
+ save_json_file(SETTINGS_FILE,old); out=get_settings(False)
+ out['keyStoredIn']=stored
+ out['keyWarning']=key_format_problem(key) if key else ''
+ return out
 
 def test_connection(baseUrl=None, model=None, apiKey=None):
  import urllib.request, urllib.error, time
@@ -335,6 +406,7 @@ def test_connection(baseUrl=None, model=None, apiKey=None):
  model=str(model or cfg.get('model','')).strip()
  key=str(apiKey or '').strip() or cfg.get('apiKey','')
  if not key: return {'ok':False,'error':'尚未配置 DeepSeek API Key，请先填写并保存'}
+ probe={'keyTail':key_tail(key),'keyLength':len(key),'keySource':('input' if str(apiKey or '').strip() else (cfg.get('keySource') or ''))}
  def chat_check():
   body=json.dumps({'model':model,'messages':[{'role':'user','content':'回复ok'}],'max_tokens':4}).encode()
   req=urllib.request.Request(base+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
@@ -347,10 +419,14 @@ def test_connection(baseUrl=None, model=None, apiKey=None):
   ms=[m.get('id') for m in data.get('data',[]) if isinstance(m,dict)]
   latency=int((time.time()-t0)*1000)
   model_ok=(model in ms) if ms else True
-  return {'ok':True,'latencyMs':latency,'endpoint':base,'model':model,'availableModels':ms,'modelOk':model_ok}
+  out={'ok':True,'latencyMs':latency,'endpoint':base,'model':model,'availableModels':ms,'modelOk':model_ok}; out.update(probe); return out
  except urllib.error.HTTPError as e:
   code=e.code; msg=e.read().decode('utf-8','ignore')[:300]
-  if code==401: return {'ok':False,'error':'DeepSeek 认为 API Key 无效或已失效（HTTP 401）：请打开「模型设置」重新填写 Key 后重试','endpoint':base}
+  if code==401:
+   fmt=key_format_problem(key)
+   msg='DeepSeek 拒绝了这个 Key（HTTP 401）。本次发送的 Key 尾号 %s、共 %d 位'%(tail,len(key))
+   msg+=(('，而且'+fmt+'。请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后填入并保存。') if fmt else '。请打开「模型设置」重新填写 Key 后重试。')
+   out={'ok':False,'error':msg,'endpoint':base}; out.update(probe); return out
   if code==404:
    try:
     t0=time.time(); chat_check(); latency=int((time.time()-t0)*1000)
@@ -373,7 +449,7 @@ def deepseek_description(item):
  body=json.dumps({'model':cfg['model'],'messages':[{'role':'user','content':prompt}],'temperature':0.1,'response_format':{'type':'json_object'}}).encode()
  req=urllib.request.Request(cfg['baseUrl']+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
  try: response=json.loads(urllib.request.urlopen(req,timeout=30).read().decode('utf-8'))
- except Exception as e: raise RuntimeError(_llm_error(e))
+ except Exception as e: raise RuntimeError(_llm_error(e,key,cfg.get('model')))
  try:
   content=response['choices'][0]['message']['content'].strip().strip(chr(96)).replace('json\n','',1)
   return json.loads(content)
@@ -437,7 +513,7 @@ def classify_collection(p):
  req=urllib.request.Request(cfg['baseUrl']+'/chat/completions',data=body,
   headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
  try: response=json.loads(urllib.request.urlopen(req,timeout=30).read().decode('utf-8'))
- except Exception as e: raise RuntimeError(_llm_error(e))
+ except Exception as e: raise RuntimeError(_llm_error(e,key,cfg.get('model')))
  try:
   content=response['choices'][0]['message']['content'].strip().strip(chr(96)).replace('json\n','',1)
   result=json.loads(content)

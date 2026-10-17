@@ -31,6 +31,26 @@ class TempApp(unittest.TestCase):
         self.tmp.cleanup()
 
 
+class FakeEnv(object):
+    """拦截环境变量写入，避免测试污染真实的用户环境变量。"""
+
+    def __init__(self):
+        self.stored = {}
+        self.fail = False
+        self.calls = []
+
+    def __call__(self, value):
+        self.calls.append(value)
+        if self.fail:
+            return False
+        val = str(value or '').strip()
+        if val:
+            self.stored[server.ENV_KEY_NAME] = val
+        else:
+            self.stored.pop(server.ENV_KEY_NAME, None)
+        return True
+
+
 class TestBasics(unittest.TestCase):
     def test_download_dir(self):
         self.assertTrue(server.download_dir('Downloads'))
@@ -124,18 +144,70 @@ class TestMove(TempApp):
 
 
 class TestSettings(TempApp):
-    def test_api_key_encrypted_and_clearable(self):
-        server.save_settings({'apiKey': 'sk-test-1234', 'autoSearch': False})
-        raw = json.loads(server.SETTINGS_FILE.read_text(encoding='utf-8'))
-        self.assertNotIn('apiKey', raw, '明文 Key 不应落盘')
-        self.assertTrue(raw.get('apiKeyEnc'))
-        self.assertEqual(server.get_settings(True)['apiKey'], 'sk-test-1234')
-        self.assertEqual(server.get_settings(False)['apiKeyMasked'][-4:], '1234')
+    """API Key 只存本机环境变量：配置文件里不留 Key，也不会进 Git。"""
 
+    def setUp(self):
+        super().setUp()
+        self.env = FakeEnv()
+        self._set_env = server.set_user_env_key
+        self._env_key = server.env_api_key
+        server.set_user_env_key = self.env
+        server.env_api_key = lambda: self.env.stored.get(server.ENV_KEY_NAME, '')
+
+    def tearDown(self):
+        server.set_user_env_key = self._set_env
+        server.env_api_key = self._env_key
+        super().tearDown()
+
+    def _raw(self):
+        return json.loads(server.SETTINGS_FILE.read_text(encoding='utf-8'))
+
+    def test_key_goes_to_env_not_to_file(self):
+        out = server.save_settings({'apiKey': 'sk-' + 'a' * 32, 'autoSearch': False})
+        self.assertEqual(out['keyStoredIn'], 'env')
+        self.assertEqual(self.env.stored[server.ENV_KEY_NAME], 'sk-' + 'a' * 32)
+        raw = self._raw()
+        self.assertNotIn('apiKey', raw, '明文 Key 不应落盘')
+        self.assertNotIn('apiKeyEnc', raw, 'Key 不该写进配置文件')
+        self.assertEqual(server.get_settings(False)['keySource'], 'env')
+        self.assertEqual(server.get_settings(False)['apiKeyMasked'][-4:], 'aaaa')
+
+    def test_env_write_failure_falls_back_to_encrypted_file(self):
+        self.env.fail = True
+        out = server.save_settings({'apiKey': 'sk-' + 'b' * 32})
+        self.assertEqual(out['keyStoredIn'], 'file')
+        raw = self._raw()
+        self.assertNotIn('apiKey', raw)
+        self.assertTrue(raw.get('apiKeyEnc'))
+        self.assertEqual(server.get_settings(True)['apiKey'], 'sk-' + 'b' * 32)
+
+    def test_clear_key_removes_env_and_file(self):
+        server.save_settings({'apiKey': 'sk-' + 'c' * 32, 'autoSearch': False})
         server.save_settings({'clearApiKey': True})
         self.assertEqual(server.get_settings(True)['apiKey'], '')
         self.assertFalse(server.get_settings(False)['apiKeyMasked'])
+        self.assertNotIn('apiKeyEnc', self._raw())
         self.assertFalse(server.get_settings(True)['autoSearch'], '清除 Key 不应把 autoSearch 打回 True')
+
+    def test_env_key_wins_over_file(self):
+        server.SETTINGS_FILE.write_text(json.dumps({'apiKeyEnc': server.protect_key('sk-file')}), encoding='utf-8')
+        self.env.stored[server.ENV_KEY_NAME] = 'sk-env'
+        self.assertEqual(server.get_settings(True)['apiKey'], 'sk-env')
+        self.assertEqual(server.get_settings(False)['keySource'], 'env')
+
+    def test_legacy_file_key_migrates_to_env_on_save(self):
+        server.SETTINGS_FILE.write_text(json.dumps({'apiKey': 'sk-legacy'}), encoding='utf-8')
+        out = server.save_settings({'autoSearch': True})
+        self.assertEqual(out['keyStoredIn'], 'env')
+        self.assertEqual(self.env.stored[server.ENV_KEY_NAME], 'sk-legacy')
+        self.assertNotIn('apiKey', self._raw())
+
+    def test_default_model_exists_in_catalog(self):
+        self.assertEqual(server.get_settings(False)['model'], 'deepseek-flash')
+
+    def test_legacy_model_name_is_corrected(self):
+        server.SETTINGS_FILE.write_text(json.dumps({'model': 'deepseek-v4-flash'}), encoding='utf-8')
+        self.assertEqual(server.get_settings(False)['model'], 'deepseek-flash')
 
     def test_destination_persisted(self):
         server.save_settings({'destination': 'F:\\归档'})
@@ -238,6 +310,35 @@ class TestNotes(TempApp):
     def test_note_used_by_search_text(self):
         item = server._search_text({'name': 'x.zip', 'note': u'装机必备'})
         self.assertIn(u'装机必备', item)
+
+
+class TestKeyFormat(unittest.TestCase):
+    """Key 格式能自查，401 时能指认具体是哪把 Key。"""
+
+    def test_valid_key_has_no_problem(self):
+        self.assertEqual(server.key_format_problem('sk-' + 'a' * 32), '')
+        self.assertEqual(server.key_format_problem(''), '')
+
+    def test_uuid_is_recognised(self):
+        self.assertIn('UUID', server.key_format_problem('11111111-2222-3333-4444-555555555555'))
+
+    def test_missing_sk_prefix(self):
+        self.assertIn('sk-', server.key_format_problem('abc123def456'))
+
+    def test_wrong_length(self):
+        self.assertIn('35', server.key_format_problem('sk-' + 'a' * 40))
+
+    def test_key_tail(self):
+        self.assertEqual(server.key_tail('sk-abcdef'), 'cdef')
+        self.assertEqual(server.key_tail(''), '')
+
+    def test_401_error_mentions_tail_and_uuid(self):
+        bad = '11111111-2222-3333-4444-555555555555'
+        err = urllib.error.HTTPError('https://api.deepseek.com', 401, 'err', {},
+                                     io.BytesIO(b'{"error":{"message":"Authentication Fails"}}'))
+        msg = server._llm_error(err, bad)
+        self.assertIn('5555', msg)
+        self.assertIn('UUID', msg)
 
 
 if __name__ == '__main__':

@@ -72,9 +72,23 @@ async function smartSearch(){
   if(version===searchVersion){button.disabled=false;button.classList.remove('searching');button.textContent='智能搜索';render()}
  }
 }async function addRoot(){let d=await native().add_manual_root();if(d.cancelled)return;if(!d.ok)return alert(d.error);alert('已添加扫描目录：'+d.result);await load(true)}
-async function openSettings(){let d=await native().get_settings();if(!d.ok)return alert(d.error);el('baseUrl').value=d.result.baseUrl;el('model').value=d.result.model;el('autoSearch').checked=d.result.autoSearch;el('keyStatus').textContent=d.result.apiKeyMasked?'已配置：'+d.result.apiKeyMasked:'尚未配置';el('apiKey').value='';el('settingsModal').classList.add('open')}
-async function saveSettings(){let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoSearch:el('autoSearch').checked});if(!d.ok)return alert(d.error);el('settingsModal').classList.remove('open');alert('设置已保存')}
-async function analyzeNow(){if(!native())return alert('AI 分析仅桌面版可用');let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoSearch:el('autoSearch').checked});if(!d.ok)return alert(d.error);let cfg=await native().get_settings();if(!cfg.ok)return alert(cfg.error);if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先填写并保存');let missing=items.filter(x=>!x.aiDescription).map(x=>x.path);if(!missing.length)return alert('所有项目都已有 AI 说明，无需分析');el('settingsModal').classList.remove('open');alert('开始 AI 分析 '+missing.length+' 个项目，完成后会提示');await enrich(missing,false)}
+async function openSettings(){
+ let d=await native().get_settings();if(!d.ok)return alert(d.error);let c=d.result||{};
+ el('baseUrl').value=c.baseUrl;el('model').value=c.model;el('autoSearch').checked=c.autoSearch;el('apiKey').value='';
+ let src=c.keySource==='env'?'（来自环境变量 '+c.keyName+'）':(c.keySource==='file'?'（存在本机配置文件里，建议改成环境变量）':'');
+ let s=c.apiKeyMasked?('已配置：'+c.apiKeyMasked+src):'尚未配置';
+ if(c.keyFormatProblem){s+='　⚠️ '+c.keyFormatProblem;el('keyStatus').style.color='#cf222e'}else{el('keyStatus').style.color='#636c76'}
+ el('keyStatus').textContent=s;el('settingsModal').classList.add('open')
+}
+async function saveSettings(){
+ let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoSearch:el('autoSearch').checked});
+ if(!d.ok)return alert(d.error);let r=d.result||{};let msg='设置已保存';
+ if(r.keyStoredIn==='env')msg+='\nAPI Key 已写入本机环境变量 '+r.keyName+'（不落盘、不进 Git）';
+ else if(r.keyStoredIn==='file')msg+='\n⚠️ 写入环境变量失败，API Key 暂存在本机加密文件里';
+ if(r.keyWarning)msg+='\n\n⚠️ Key 格式提醒：'+r.keyWarning;
+ el('apiKey').value='';el('settingsModal').classList.remove('open');alert(msg)
+}
+async function analyzeNow(){if(!native())return alert('AI 分析仅桌面版可用');let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoSearch:el('autoSearch').checked});if(!d.ok)return alert(d.error);let cfg=await native().get_settings();if(!cfg.ok)return alert(cfg.error);if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先填写并保存');if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后再点「立即 AI 分析」。');let missing=items.filter(x=>!x.aiDescription).map(x=>x.path);if(!missing.length)return alert('所有项目都已有 AI 说明，无需分析');el('settingsModal').classList.remove('open');alert('开始 AI 分析 '+missing.length+' 个项目，完成后会提示');await enrich(missing,false)}
 
 async function action(type){
  let paths=[...chosen],dest=el('dest').value.trim();
@@ -99,13 +113,13 @@ async function action(type){
 }
 async function clearKey(){
  if(!native()||typeof native().save_settings!=='function')return alert('仅桌面版可修改设置');
- if(!confirm('确认清除已保存的 DeepSeek API Key？清除后 AI 说明与智能搜索的语义扩展将不可用。'))return;
+ if(!confirm('确认清除 DeepSeek API Key（同时删除本机环境变量 DEEPSEEK_API_KEY 与配置文件里的残留）？清除后 AI 说明与智能搜索的语义扩展将不可用。'))return;
  let d=await native().save_settings({clearApiKey:true});
  if(!d.ok)return alert(d.error);
  el('apiKey').value='';el('keyStatus').textContent='尚未配置';
  alert('已清除 API Key')
 }
-async function testConn(){let btn=el('testConn'),res=el('testResult');btn.disabled=true;res.textContent='正在测试连接…';res.style.color='#636c76';try{if(!native()||typeof native().test_connection!=='function')throw Error('连接测试仅桌面版可用');let d=await native().test_connection({baseUrl:el('baseUrl').value,model:el('model').value,apiKey:el('apiKey').value});if(!d.ok)throw Error(d.error||'连接失败');let ok=d.modelOk===false?('模型“'+d.model+'”不在可用列表'):'连接成功';let lat=d.latencyMs!=null?(' · '+d.latencyMs+' ms'):'';res.textContent=ok+lat;res.style.color=d.modelOk===false?'#9a6700':'#1a7f37';if(d.availableModels&&d.availableModels.length){res.title='可用模型: '+d.availableModels.join(', ');window.diagModels=d.availableModels}}catch(e){res.textContent='连接失败：'+e.message;res.style.color='#cf222e'}finally{btn.disabled=false}}
+async function testConn(){let btn=el('testConn'),res=el('testResult');btn.disabled=true;res.textContent='正在测试连接…';res.style.color='#636c76';try{if(!native()||typeof native().test_connection!=='function')throw Error('连接测试仅桌面版可用');let d=await native().test_connection({baseUrl:el('baseUrl').value,model:el('model').value,apiKey:el('apiKey').value});if(!d.ok)throw Error(d.error||'连接失败');let ok=d.modelOk===false?('模型“'+d.model+'”不在可用列表'):'连接成功';let lat=d.latencyMs!=null?(' · '+d.latencyMs+' ms'):'';let kt=d.keyTail?(' · Key 尾号 '+d.keyTail):'';res.textContent=ok+lat+kt;if(d.modelOk===false&&d.availableModels&&d.availableModels.length)res.textContent+='；可用模型：'+d.availableModels.join('、');res.style.color=d.modelOk===false?'#9a6700':'#1a7f37';if(d.availableModels&&d.availableModels.length){res.title='可用模型: '+d.availableModels.join(', ');window.diagModels=d.availableModels}}catch(e){res.textContent='连接失败：'+e.message;res.style.color='#cf222e'}finally{btn.disabled=false}}
 document.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>setSort(th.dataset.sort));el('settingsBtn').onclick=openSettings;el('testConn').onclick=testConn;el('smartSearch').onclick=smartSearch;el('clearKey').onclick=clearKey;el('settingsCancel').onclick=()=>el('settingsModal').classList.remove('open');el('settingsAnalyze').onclick=analyzeNow;el('settingsSave').onclick=saveSettings;el('q').oninput=()=>{searchVersion++;naturalPaths=null;el('searchStatus').textContent='';el('smartSearch').disabled=false;el('smartSearch').classList.remove('searching');el('smartSearch').textContent='智能搜索';render()};el('q').onkeydown=e=>{if(e.key==='Enter')smartSearch()};el('filter').onchange=render;el('onlyNew').onchange=render;el('root').onchange=()=>{if(el('root').value==='__add__'){el('root').value='';addRoot()}else render()};el('rescan').onclick=()=>load(true);el('keep').onclick=()=>action('keep');el('move').onclick=()=>action('move');el('del').onclick=()=>action('delete');el('all').onchange=e=>{visible().forEach(x=>e.target.checked?chosen.add(x.id):chosen.delete(x.id));render()};
 let started=false;async function startWhenReady(){if(started)return;let api=native();if(api&&typeof api.scan==='function'&&typeof api.enrich==='function'){started=true;el('status').textContent='原生接口已连接';try{let v=await api.app_version();if(v&&v.ok&&v.result)el('ver').textContent='V'+v.result}catch(_){}await load(false);return}el('status').textContent='正在连接本机分析接口…';setTimeout(startWhenReady,200)}window.addEventListener('pywebviewready',startWhenReady);startWhenReady();
 

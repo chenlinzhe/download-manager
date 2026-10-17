@@ -1,8 +1,8 @@
 # UTF-8
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 1, 0, 0),
-    prodvers=(1, 1, 0, 0),
+    filevers=(1, 2, 0, 0),
+    prodvers=(1, 2, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -16,12 +16,12 @@ VSVersionInfo(
         '080404B0',
         [StringStruct('CompanyName', '下载包管家智能搜索版'),
          StringStruct('FileDescription', '下载包管家：本机下载目录智能整理工具'),
-         StringStruct('FileVersion', '1.1'),
+         StringStruct('FileVersion', '1.2'),
          StringStruct('InternalName', '下载包管家智能搜索版'),
          StringStruct('LegalCopyright', 'Copyright (C) 2026'),
-         StringStruct('OriginalFilename', '下载包管家智能搜索版-v11.exe'),
+         StringStruct('OriginalFilename', '下载包管家智能搜索版-v12.exe'),
          StringStruct('ProductName', '下载包管家智能搜索版'),
-         StringStruct('ProductVersion', '1.1')])
+         StringStruct('ProductVersion', '1.2')])
     ]),
     VarFileInfo([VarStruct('Translation', [2052, 1200])])
   ]

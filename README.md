@@ -2,7 +2,7 @@
 
 > **你的下载目录，AI 帮你管。** 一款运行在本机的下载包智能整理工具——自动扫描、AI 识别、风险预警、一键整理，再也不用面对几 TB 的"下载"文件夹发愁。
 
-当前版本：**V1.1** ｜ 绿色免安装 ｜ Windows 10/11
+当前版本：**V1.2** ｜ 绿色免安装 ｜ Windows 10/11
 
 ---
 
@@ -28,7 +28,7 @@
 
 ### 🔒 隐私安全，全部本地
 - 纯本地运行：pywebview 桌面窗口，**不对外开放端口**（仅 pywebview 内部用本机回环随机端口，窗口关闭即释放）
-- API Key 用 **Windows DPAPI 加密**后落盘，界面只显示尾号，不回显完整密钥；配置与数据存于 `%LOCALAPPDATA%\DownloadPackageManager`
+- API Key 只存**本机用户环境变量 `DEEPSEEK_API_KEY`**（在【模型设置】里填写会自动写入；写不进去才退回到 DPAPI 加密文件），配置文件里不留 Key，也不会提交到 Git；界面只显示尾号，不回显完整密钥；配置与数据存于 `%LOCALAPPDATA%\DownloadPackageManager`
 - 仓库不含任何敏感配置，`settings.json` 已被 git 忽略
 
 ### 🎯 专为"下载强迫症"设计
@@ -40,9 +40,9 @@
 
 ### 直接使用（推荐，无需装 Python）
 
-👉 **[⬇️ 下载 DownloadPackageManager-v11.exe](https://github.com/chenlinzhe/download-manager/releases/latest)**
+👉 **[⬇️ 下载 DownloadPackageManager-v12.exe](https://github.com/chenlinzhe/download-manager/releases/latest)**
 
-下载后**双击运行**即可。首次使用在【模型设置】中填入你的 DeepSeek API Key（可自选模型，默认 `deepseek-v4-flash`）。
+下载后**双击运行**即可。首次使用在【模型设置】中填入你的 DeepSeek API Key（形如 `sk-` 开头共 35 位；可自选模型，默认 `deepseek-flash`）——Key 会自动写入本机环境变量 `DEEPSEEK_API_KEY`，不落盘、不进 Git。
 
 ### 从源码运行
 
