@@ -107,8 +107,7 @@ td.llm{min-width:300px;max-width:400px;cursor:text}
 .ai{padding:6px 8px;background:var(--accent-soft);border-radius:var(--radius-sm);color:var(--info-fg);font-size:13px}
 .mynote{margin-top:5px;padding:2px 8px;background:var(--warn-bg);border-radius:var(--radius-sm);color:var(--warn-fg);font-size:12px}
 .note-hint{margin-top:5px;font-size:11px;color:var(--fg-faint)}
-.note-edit{width:100%;font:inherit;border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:6px;background:var(--surface);color:var(--fg);resize:vertical}
-.note-actions{display:flex;gap:6px;margin-top:6px}
+.note-edit{width:100%;font:inherit;font-size:13px;border:1px solid var(--accent);border-radius:var(--radius-sm);padding:5px 8px;background:var(--surface);color:var(--fg);resize:none}
 .modal{display:none;position:fixed;inset:0;z-index:60;background:rgba(17,24,39,.45);align-items:center;justify-content:center;padding:20px}
 html.dark .modal{background:rgba(0,0,0,.66)}
 .modal.open{display:flex}
@@ -130,7 +129,7 @@ button.chip:hover:not(:disabled){border-color:var(--accent);color:var(--accent);
 .confirm-text{margin:10px 0 0;color:var(--fg-muted);font-size:13.5px;line-height:1.75;white-space:pre-line}
 /* 设置面板：左菜单 + 右侧内容 */
 .dialog-wide{width:min(880px,96vw);padding:0;overflow:hidden}
-.settings{display:grid;grid-template-columns:186px minmax(0,1fr);max-height:86vh}
+.settings{display:grid;grid-template-columns:186px minmax(0,1fr);height:min(560px,86vh);max-height:86vh}
 .settings-nav{display:flex;flex-direction:column;gap:2px;padding:14px 10px;background:var(--surface-2);border-right:1px solid var(--border)}
 .settings-title{font-size:12px;font-weight:600;color:var(--fg-faint);padding:4px 10px 8px;letter-spacing:.4px}
 button.nav-item{text-align:left;border:0;background:transparent;border-radius:var(--radius-sm);padding:8px 10px;font-weight:500;color:var(--fg-muted)}
@@ -170,7 +169,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </head>
 <body>
 <header>
- <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V1.5</span></div>
+ <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V1.6</span></div>
  <div class="header-right">
   <span id="status">准备加载…</span>
   <button id="themeBtn" class="icon-btn" title="切换深色 / 浅色主题（也可以在设置 → 外观与主题里选跟随系统）" aria-label="切换主题">&#9790;</button>
@@ -242,7 +241,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    <button type="button" class="nav-item active" data-pane="model" title="DeepSeek 的 API Key、API 地址与模型">模型设置</button>
    <button type="button" class="nav-item" data-pane="ignore" title="查看并撤销被忽略的项目名字">忽略名单</button>
    <button type="button" class="nav-item" data-pane="theme" title="跟随系统 / 浅色 / 深色">外观与主题</button>
-   <div class="nav-foot">下载包管家 V1.5<br>程序不会运行任何安装包</div>
+   <div class="nav-foot">下载包管家 V1.6<br>程序不会运行任何安装包</div>
   </nav>
   <section class="settings-body">
    <div class="pane" data-pane="model">
@@ -326,6 +325,6 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="ctxMenu" class="ctx-menu"></div>
-<script src="app.js?v=20260820-09"></script>
+<script src="app.js?v=20260820-10"></script>
 </body>
 </html>

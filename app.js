@@ -207,25 +207,35 @@ document.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>setSort(th.d
 let started=false;async function startWhenReady(){if(started)return;let api=native();if(api&&typeof api.scan==='function'&&typeof api.enrich==='function'){started=true;el('status').textContent='原生接口已连接';try{let v=await api.app_version();if(v&&v.ok&&v.result)el('ver').textContent='V'+v.result}catch(_){}await load(false);return}el('status').textContent='正在连接本机分析接口…';setTimeout(startWhenReady,200)}window.addEventListener('pywebviewready',startWhenReady);startWhenReady();
 
 async function editNote(td){
- if(td.querySelector('textarea'))return;
+ let typing=td.querySelector('input.note-edit');
+ if(typing){typing.focus();typing.select();return}
  let path=td.dataset.path,item=items.find(x=>x.path===path),cur=(item&&item.note)||'';
- td.innerHTML='<textarea class="note-edit" rows="3" maxlength="200" placeholder="写点自己的备注，例如：给谁用 / 别删 / 装完就能删"></textarea><div class="note-actions"><button class="mini primary" data-act="save">保存</button><button class="mini" data-act="cancel">取消</button></div>';
- let ta=td.querySelector('textarea');ta.value=cur;ta.focus();ta.select();
+ let old=td.innerHTML;
+ td.innerHTML='<input class="note-edit" type="text" maxlength="200" spellcheck="false" autocomplete="off" placeholder="写一句自己的备注，例如：给谁用 / 别删 / 装完就能删">';
+ let inp=td.querySelector('input.note-edit');
+ inp.value=cur;
+ inp.focus();
+ inp.select();
  let closed=false;
- const done=async save=>{
-  if(closed)return;closed=true;
-  if(!save){render();return}
-  if(!native()||typeof native().set_note!=='function'){alert('备注仅桌面版可保存');render();return}
+ const finish=async save=>{
+  if(closed)return;
+  closed=true;
+  let v=inp.value.trim();
+  if(!save||v===cur){td.innerHTML=old;return}
+  if(!native()||typeof native().set_note!=='function'){toast('备注仅桌面版可保存',true);td.innerHTML=old;return}
   let d;
-  try{d=await native().set_note(path,ta.value)}catch(e){d={ok:false,error:e.message}}
-  if(!d||!d.ok){alert('备注保存失败：'+((d&&d.error)||'未知错误'));render();return}
+  try{d=await native().set_note(path,v)}catch(e){d={ok:false,error:e.message}}
+  if(!d||!d.ok){toast('备注保存失败：'+((d&&d.error)||'未知错误'),true);td.innerHTML=old;return}
   if(item)item.note=(d.result&&d.result.note)||'';
-  render()
+  td.innerHTML=item?aiBox(item):old;
+  toast(v?'备注已保存':'备注已清除')
  };
- td.querySelector('[data-act="save"]').onclick=e=>{e.stopPropagation();done(true)};
- td.querySelector('[data-act="cancel"]').onclick=e=>{e.stopPropagation();done(false)};
- ta.onclick=e=>e.stopPropagation();
- ta.onkeydown=e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();done(true)}else if(e.key==='Escape'){e.preventDefault();done(false)}};
+ inp.onclick=e=>e.stopPropagation();
+ inp.onblur=()=>finish(true);
+ inp.onkeydown=e=>{
+  if(e.key==='Enter'){e.preventDefault();finish(true)}
+  else if(e.key==='Escape'){e.preventDefault();finish(false)}
+ };
 }
 /* ---------- V1.3：右键菜单 / 忽略名单 / AI 分析 ---------- */
 function refreshCounts(){el('count').textContent=items.length;el('size').textContent=fmt(items.reduce((a,x)=>a+x.size,0));el('drop').textContent=items.filter(x=>x.recommendation==='不用保住').length;el('risky').textContent=items.filter(x=>x.suspicious).length}
