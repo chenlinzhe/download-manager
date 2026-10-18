@@ -11,12 +11,12 @@ class Api:
  def open_path(self, path):
   try: return {'ok':True,'result':server.open_path(path)}
   except Exception as e: return {'ok':False,'error':str(e)}
- def add_manual_root(self):
+ def add_manual_root(self, group=None):
   try:
    result=webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG)
    if not result: return {'ok':False,'cancelled':True}
    path=result[0] if isinstance(result,(list,tuple)) else result
-   return {'ok':True,'result':server.add_manual_root(path)}
+   return {'ok':True,'result':server.add_manual_root(path,group)}
   except Exception as e: return {'ok':False,'error':str(e)}
  def tokenize(self, query):
   try: return {'ok':True,'result':server.split_query_terms(query)}
@@ -35,11 +35,17 @@ class Api:
    data=data or {}
    return server.test_connection(data.get('baseUrl'),data.get('model'),data.get('apiKey'))
   except Exception as e: return {'ok':False,'error':str(e)}
- def enrich(self, paths):
-  try: return server.enrich_items(paths)
+ def enrich(self, paths, force=False):
+  try: return server.enrich_items(paths, force)
   except Exception as e: return {'ok':False,'error':str(e)}
  def set_note(self, path, text):
   try: return {'ok':True,'result':server.save_note(path,text)}
+  except Exception as e: return {'ok':False,'error':str(e)}
+ def add_group(self, name):
+  try: return {'ok':True,'result':server.add_group(name)}
+  except Exception as e: return {'ok':False,'error':str(e)}
+ def rename_group(self, group, name):
+  try: return {'ok':True,'result':server.rename_group(group,name)}
   except Exception as e: return {'ok':False,'error':str(e)}
  def app_version(self):
   try: return {'ok':True,'result':server.APP_VERSION}

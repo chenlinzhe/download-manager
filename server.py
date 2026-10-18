@@ -9,7 +9,8 @@ if getattr(__import__('sys'),'frozen',False):
  APP.mkdir(parents=True,exist_ok=True)
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
-APP_VERSION='1.7'
+GROUPS_FILE=APP/'resource_groups.json'
+APP_VERSION='1.8'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -44,13 +45,101 @@ def roots():
   except OSError: pass
  return sorted(set(out),key=lambda p:str(p).lower())
 
-def add_manual_root(path):
+def load_groups():
+ """读取用户自建的资源标签：每个标签一个名字 + 一组目录。"""
+ data=load_json_file(GROUPS_FILE,[])
+ if not isinstance(data,list): return []
+ out=[]
+ for g in data:
+  if not isinstance(g,dict): continue
+  gid=' '.join(str(g.get('id') or '').split())
+  name=' '.join(str(g.get('name') or '').split())[:24]
+  if not gid or not name or gid=='download': continue
+  rs=[]; seen=set()
+  for raw in g.get('roots') or []:
+   try: p=Path(raw)
+   except (OSError,ValueError): continue
+   key=str(p).lower()
+   if key in seen: continue
+   seen.add(key); rs.append(str(p))
+  out.append({'id':gid,'name':name,'roots':rs})
+ return out
+
+def save_groups(rows):
+ data=[{'id':g['id'],'name':g['name'],'roots':[str(x) for x in g.get('roots') or []]} for g in rows if g.get('id') and g.get('id')!='download']
+ save_json_file(GROUPS_FILE,data)
+ return data
+
+def groups():
+ """资源标签清单：第一项固定是内置的「下载包」（自动发现的下载目录 + 手工加的目录），其后是用户自建的标签。"""
+ auto=[str(x) for x in roots()]
+ out=[{'id':'download','name':'下载包','roots':auto,'builtin':True}]
+ for g in load_groups():
+  rs=[]
+  for raw in g['roots']:
+   try: p=Path(raw)
+   except (OSError,ValueError): continue
+   if p.is_dir(): rs.append(str(p))
+  out.append({'id':g['id'],'name':g['name'],'roots':rs,'builtin':False})
+ return out
+
+def all_roots():
+ out=[]
+ for g in groups():
+  for raw in g['roots']:
+   try: out.append(Path(raw))
+   except (OSError,ValueError): pass
+ return out
+
+def add_group(name):
+ """新建一个用户自定义的资源标签（例如「我的项目」）。"""
+ text=' '.join(str(name or '').split())[:24]
+ if not text: raise ValueError('标签名不能为空')
+ for g in groups():
+  if g['name'].lower()==text.lower(): raise ValueError('已经有叫「'+text+'」的标签了')
+ data=load_groups()
+ gid='g'+str(int(time.time()*1000))
+ used={g['id'] for g in data}
+ n=2
+ while gid in used:
+  gid='g'+str(int(time.time()*1000))+'-'+str(n); n+=1
+ data.append({'id':gid,'name':text,'roots':[]})
+ save_groups(data)
+ return {'id':gid,'name':text,'roots':[]}
+
+def rename_group(gid,name):
+ """给用户自建的资源标签改名；内置的「下载包」不许改名。"""
+ key=' '.join(str(gid or '').split())
+ if not key: raise ValueError('缺少标签')
+ if key=='download': raise ValueError('内置标签「下载包」不用改名')
+ text=' '.join(str(name or '').split())[:24]
+ if not text: raise ValueError('标签名不能为空')
+ data=load_groups(); target=None
+ for g in data:
+  if g['id']==key: target=g
+  elif g['name'].lower()==text.lower(): raise ValueError('已经有叫「'+text+'」的标签了')
+ if target is None: raise ValueError('找不到这个标签')
+ target['name']=text
+ save_groups(data)
+ return {'id':key,'name':text,'roots':target['roots']}
+
+def add_manual_root(path,group=None):
+ """把目录加到某个资源标签下；默认加到内置的「下载包」。"""
  p=Path(path).resolve()
  if not p.is_dir(): raise ValueError('所选路径不是有效目录')
- values=load_json_file(MANUAL_ROOTS_FILE,[])
- normalized={str(Path(x).resolve()).lower():x for x in values}
- normalized[str(p).lower()]=str(p)
- save_json_file(MANUAL_ROOTS_FILE,list(normalized.values()))
+ gid=' '.join(str(group or '').split()) or 'download'
+ if gid=='download':
+  values=load_json_file(MANUAL_ROOTS_FILE,[])
+  normalized={str(Path(x).resolve()).lower():x for x in values}
+  normalized[str(p).lower()]=str(p)
+  save_json_file(MANUAL_ROOTS_FILE,list(normalized.values()))
+  return str(p)
+ data=load_groups(); target=None
+ for g in data:
+  if g['id']==gid: target=g
+ if target is None: raise ValueError('找不到这个标签：'+gid)
+ if str(p).lower() not in {str(Path(x)).lower() for x in target['roots']}:
+  target['roots'].append(str(p)); save_groups(data)
  return str(p)
 
 def open_path(path):
@@ -505,7 +594,7 @@ def deepseek_description(item):
   return json.loads(content)
  except (KeyError,IndexError,ValueError) as e: raise RuntimeError('DeepSeek 返回内容无法解析：'+str(e)[:120])
 
-def enrich_items(paths):
+def enrich_items(paths, force=False):
  wanted=set(paths); cache=load_json_file(AI_CACHE_FILE,{})
  # Reuse the most recent scan. The old implementation rescanned every drive for
  # every package, which made the UI appear stuck.
@@ -515,7 +604,8 @@ def enrich_items(paths):
  results={}; errors={}; pending=[]
  for item in targets:
   fp=item_fingerprint(item)
-  if fp in cache: results[item['path']]=cache[fp]
+  # force=True：用户按住 Shift 明确要求重做，忽略缓存再问一遍 AI
+  if fp in cache and not force: results[item['path']]=cache[fp]
   else: pending.append(item)
  def ask(item):
   desc=deepseek_description(item)
@@ -721,8 +811,30 @@ def _drop_ignored(data):
  return data
 
 def _finalize(data):
- """扫描结果统一出口：附加备注 + 过滤忽略名单。"""
- return _drop_ignored(_with_notes(data))
+ """扫描结果统一出口：附加资源标签 + 备注 + 过滤忽略名单。"""
+ return _with_groups(_drop_ignored(_with_notes(data)))
+
+def _with_groups(data):
+ """在扫描结果上附加资源标签清单（每个标签带目录与项目数），并给每个条目补上所属标签。"""
+ if not isinstance(data,dict): return data
+ rows=data.get('items') if isinstance(data.get('items'),list) else []
+ counts={}
+ for item in rows:
+  if not isinstance(item,dict): continue
+  gid=str(item.get('group') or 'download')
+  counts[gid]=counts.get(gid,0)+1
+ names={}; summary=[]
+ for g in groups():
+  names[g['id']]=g['name']
+  summary.append({'id':g['id'],'name':g['name'],'roots':g['roots'],
+                  'count':counts.get(g['id'],0),'builtin':g.get('builtin',False)})
+ for item in rows:
+  if not isinstance(item,dict): continue
+  gid=str(item.get('group') or 'download')
+  item['group']=gid
+  item['groupName']=names.get(gid,'')
+ data['groups']=summary
+ return data
 
 def _manual_keep_fields(manual):
  """「标为保留」在条目上体现出来的字段（扫描与单条重算共用）。"""
@@ -783,7 +895,7 @@ def remove_keep(paths):
  return {'removed':removed,'refreshed':refreshed}
 
 def save_keep(paths):
- labels=load_labels(); now=datetime.now().isoformat(timespec='seconds'); marked=[]; base=roots()
+ labels=load_labels(); now=datetime.now().isoformat(timespec='seconds'); marked=[]; base=all_roots()
  for x in paths:
   p=Path(x)
   if not allowed(p,base) or not p.exists(): continue
@@ -822,11 +934,18 @@ def _scan_impl(force=False):
     data={'generatedAt':snap['generatedAt'],'items':snap['items'],'roots':snap.get('roots',[]),'errors':snap.get('errors',[])}
     with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
     return _finalize(data)
- set_progress('枚举扫描目录'); rr=roots(); out=[]; errors=[]; labels=load_labels(); ai_cache=load_json_file(AI_CACHE_FILE,{}); old_inventory=set(load_json_file(INVENTORY_FILE,[])); baseline=not INVENTORY_FILE.exists()
- def add_item(p,root,collection=None,collection_reason='',media_kind=''):
+ set_progress('枚举扫描目录'); rr=[]; out=[]; errors=[]; labels=load_labels(); ai_cache=load_json_file(AI_CACHE_FILE,{}); old_inventory=set(load_json_file(INVENTORY_FILE,[])); baseline=not INVENTORY_FILE.exists(); seen_roots=set()
+ for group_rows in groups():
+  for raw in group_rows['roots']:
+   try: rp=Path(raw)
+   except (OSError,ValueError): continue
+   key=str(rp).lower()
+   if key in seen_roots: continue
+   seen_roots.add(key); rr.append((group_rows,rp))
+ def add_item(p,root,collection=None,collection_reason='',media_kind='',grp=None):
   try:
    size,files,dirs,newest,hints,errs=summary(p); newest=newest or p.stat().st_mtime
-   item={'id':str(p),'name':p.name,'path':str(p),'parentPath':str(p.parent),'root':str(root),'size':size,'files':files,'dirs':dirs,'modified':datetime.fromtimestamp(newest).isoformat(timespec='seconds'),'readErrors':errs,**analyze(p,size,files,newest,hints)}
+   item={'id':str(p),'name':p.name,'path':str(p),'parentPath':str(p.parent),'root':str(root),'group':(grp or {}).get('id','download'),'groupName':(grp or {}).get('name','下载包'),'size':size,'files':files,'dirs':dirs,'modified':datetime.fromtimestamp(newest).isoformat(timespec='seconds'),'readErrors':errs,**analyze(p,size,files,newest,hints)}
    if media_kind:
     item.update(kind=media_kind+'目录',recommendation='建议保留',score=max(85,item['score']),mediaDirectory=True)
     item['reasons']=['目录内主要是'+media_kind+'，不拆成下载包；请按个人媒体资料处理']
@@ -838,7 +957,7 @@ def _scan_impl(force=False):
    fp=item_fingerprint(item); item['fingerprint']=fp; item['aiDescription']=({'summary':media_kind,'model':'本地媒体识别'} if media_kind else ai_cache.get(fp)); item['isNew']=False if baseline else fp not in old_inventory
    out.append(item)
   except OSError as e: errors.append(str(e))
- for ri,root in enumerate(rr,1):
+ for ri,(grp,root) in enumerate(rr,1):
   set_progress('统计目录内容',ri,len(rr))
   try: children=list(root.iterdir())
   except OSError as e: errors.append(str(e)); continue
@@ -851,20 +970,20 @@ def _scan_impl(force=False):
    if p.is_file() and media_file_kind(p): continue
    media_kind=media_kinds.get(str(p),'')
    if media_kind:
-    add_item(p,root,media_kind=media_kind); continue
+    add_item(p,root,media_kind=media_kind,grp=grp); continue
    decision=decisions.get(str(p),{})
    if p.is_dir() and decision.get('isCollection'):
     try: members=list(p.iterdir())
-    except OSError as e: errors.append(str(e)); add_item(p,root); continue
+    except OSError as e: errors.append(str(e)); add_item(p,root,grp=grp); continue
     if ign_names or ign_paths: members=[m for m in members if not is_ignored(m,ign_names,ign_paths)]
     for member in members:
      if member.is_file() and media_file_kind(member): continue
      member_media=media_directory_kind(member) if member.is_dir() else ''
-     add_item(member,root,p.name,decision.get('reason','多个下载包的集合'),member_media)
-   else: add_item(p,root)
+     add_item(member,root,p.name,decision.get('reason','多个下载包的集合'),member_media,grp)
+   else: add_item(p,root,grp=grp)
  set_progress('保存扫描结果')
  save_json_file(INVENTORY_FILE,[item_fingerprint(x) for x in out])
- data={'generatedAt':datetime.now().isoformat(timespec='seconds'),'items':out,'roots':[str(x) for x in rr],'errors':errors,'version':APP_VERSION}
+ data={'generatedAt':datetime.now().isoformat(timespec='seconds'),'items':out,'roots':[str(p) for _,p in rr],'errors':errors,'version':APP_VERSION}
  save_json_file(SNAPSHOT_FILE,data)
  with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
  return _finalize(data)
@@ -872,7 +991,7 @@ def _scan_impl(force=False):
 def allowed(p,root_list=None):
  try:
   resolved=p.resolve()
-  for root in (root_list if root_list is not None else roots()):
+  for root in (root_list if root_list is not None else all_roots()):
    try:
     rel=resolved.relative_to(root.resolve())
     if len(rel.parts) in (1,2): return True
@@ -881,7 +1000,7 @@ def allowed(p,root_list=None):
  except OSError: return False
 
 def recycle(paths):
- base=roots()
+ base=all_roots()
  safe=[str(Path(x).resolve()) for x in paths if allowed(Path(x),base) and Path(x).exists()]
  if not safe: return []
  # Native Windows Shell API: FO_DELETE with FOF_ALLOWUNDO sends items to Recycle Bin.
@@ -900,7 +1019,7 @@ def recycle(paths):
 def move(paths,dest):
  d=Path(dest)
  if not d.is_absolute(): raise ValueError('目标目录必须是绝对路径')
- d.mkdir(parents=True,exist_ok=True); done=[]; failed=[]; base=roots()
+ d.mkdir(parents=True,exist_ok=True); done=[]; failed=[]; base=all_roots()
  for x in paths:
   p=Path(x)
   try:
@@ -932,7 +1051,10 @@ class H(SimpleHTTPRequestHandler):
   return super().do_GET()
  def do_POST(self):
   try:
-   data=json.loads(self.rfile.read(int(self.headers.get('Content-Length','0'))) or b'{}'); paths=data.get('paths',[])
+   data=json.loads(self.rfile.read(int(self.headers.get('Content-Length','0'))) or b'{}')
+   if self.path=='/api/add_group': return self.sendj({'ok':True,'result':add_group(data.get('name',''))})
+   if self.path=='/api/rename_group': return self.sendj({'ok':True,'result':rename_group(data.get('id',''),data.get('name',''))})
+   paths=data.get('paths',[])
    if not isinstance(paths,list) or len(paths)>500: raise ValueError('选择列表无效')
    result=move(paths,data.get('destination','')) if self.path=='/api/move' else recycle(paths) if self.path=='/api/recycle' else save_keep(paths) if self.path=='/api/keep' else None
    if result is None: return self.sendj({'error':'Not found'},404)

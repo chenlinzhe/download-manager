@@ -42,14 +42,108 @@ function uiConfirm(text,okLabel,title){
   setTimeout(()=>ok.focus(),30);
  });
 }
-let items=[],chosen=new Set(),naturalPaths=null,searchVersion=0,sortKey='',sortDir=1,lastDestination='',moveTargets=[];
+let items=[],chosen=new Set(),scanGroups=[],activeGroup='download',scanInfo=null,naturalPaths=null,searchVersion=0,sortKey='',sortDir=1,lastDestination='',moveTargets=[];
 const native=()=>window.desktop||window.pywebview?.api;const el=id=>document.getElementById(id);function fmt(n){if(!n)return'0 B';let u=['B','KB','MB','GB','TB'],i=Math.min(4,Math.floor(Math.log(n)/Math.log(1024)));return(n/1024**i).toFixed(i?1:0)+' '+u[i]}function esc(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function cls(r){return (r==='建议保留'||r==='保留（手工）')?'keep':r==='待确认'?'review':'drop'}function fuzzy(text,q){text=(text||'').toLowerCase();q=(q||'').toLowerCase().trim();if(!q)return true;return text.includes(q)}const REC_ORDER={'保留（手工）':0,'建议保留':1,'待确认':2,'不用保住':3};
 function sortVal(x,k){switch(k){case'name':return (x.displayName||x.name||'').toLowerCase();case'rec':return REC_ORDER[x.recommendation]===undefined?9:REC_ORDER[x.recommendation];case'score':return x.score||0;case'size':return x.size||0;case'modified':return x.modified||'';case'ai':return (x.aiDescription&&x.aiDescription.summary)?1:0;default:return 0}}
 function setSort(k){if(sortKey===k)sortDir=-sortDir;else{sortKey=k;sortDir=(k==='name'||k==='rec'||k==='ai')?1:-1}document.querySelectorAll('th.sortable').forEach(th=>{th.classList.remove('asc','desc');if(th.dataset.sort===sortKey)th.classList.add(sortDir>0?'asc':'desc')});render()}
-function visible(){let q=el('q').value,f=el('filter').value,r=el('root').value,onlyNew=el('onlyNew').checked;let v=items.filter(x=>(naturalPaths?naturalPaths.has(x.path):fuzzy([x.name,x.displayName,x.path,x.kind,(x.aiDescription||{}).summary,x.note].join(' '),q))&&(!f||x.recommendation===f)&&(!r||x.root===r)&&(!onlyNew||x.isNew));if(sortKey)v.sort((m,n)=>{let p=sortVal(m,sortKey),q2=sortVal(n,sortKey);return(p<q2?-1:p>q2?1:0)*sortDir});return v}
+function visible(){let q=el('q').value,f=el('filter').value,r=el('root').value,onlyNew=el('onlyNew').checked;let v=items.filter(x=>(x.group||'download')===activeGroup&&(naturalPaths?naturalPaths.has(x.path):fuzzy([x.name,x.displayName,x.path,x.kind,(x.aiDescription||{}).summary,x.note].join(' '),q))&&(!f||x.recommendation===f)&&(!r||x.root===r)&&(!onlyNew||x.isNew));if(sortKey)v.sort((m,n)=>{let p=sortVal(m,sortKey),q2=sortVal(n,sortKey);return(p<q2?-1:p>q2?1:0)*sortDir});return v}
 const STOP=new Set(('的了着是在有和与及或也都就才又再还只但并而这那此其某个吗呢吧啊呀哦嗯哈嗦啦喰么之对从向给被把让到于为以用想找要搜查看请帮哪什该我你他她它咱俺种').split(''));['一个','一下','一种','一些','一类','一款','这个','那个','这些','那些','哪个','哪些','这种','那种','哪种','这么','那么','这样','那样','一点','有些','东西','里面','我们','你们','他们','她们','它们','咱们','自己','可以','想要','需要','应该','看看','点儿','有点儿','如何','为什么','a','an','the','of','for','is','are','it','to','and','or','this','that','these','those','want','find','get','with','my','me','one','we','you','they'].forEach(w=>STOP.add(w));
 function cutTerms(q){q=(q||'').toLowerCase();let toks=q.match(/[a-z0-9]+|[\u4e00-\u9fff]+/g)||[];let out=[],seen=new Set();for(let t of toks){if(t&&!seen.has(t)){seen.add(t);out.push(t);}}let kept=out.filter(c=>!STOP.has(c));return kept.length?kept:out;}
-function aiBox(x){let box=x.aiDescription?'<div class="ai"><b>这是：</b>'+esc(x.aiDescription.summary||'')+'</div>':'<span class="muted">--</span>';let note=x.note?'<div class="mynote">我的备注：'+esc(x.note)+'</div>':'<div class="note-hint">✎ 点击写备注</div>';return box+note}
+/* ---------- 资源标签（tab）：第一项固定是内置的「下载包」，其余由用户自建 ---------- */
+function groupItems(){return items.filter(x=>(x.group||'download')===activeGroup)}
+function groupOf(gid){return scanGroups.find(g=>g.id===gid)||null}
+function activeGroupName(){let g=groupOf(activeGroup);return g?g.name:'下载包'}
+function renderTags(){
+ let bar=el('tagBar');if(!bar)return;
+ let list=scanGroups.length?scanGroups:[{id:'download',name:'下载包',roots:[],count:0,builtin:true}];
+ bar.hidden=false;
+ bar.innerHTML=list.map(g=>{
+  let on=g.id===activeGroup;
+  let tips=(g.roots&&g.roots.length)?g.roots.join('\n'):'这个标签下还没有目录：在目录下拉里选「＋ 新增目录…」把目录加进来';
+  let edit=g.builtin?'':'<button type="button" class="tag-edit" data-gid="'+esc(g.id)+'" title="给这个标签改名">✎</button>';
+  return '<span class="tag-wrap'+(on?' on':'')+'"><button type="button" class="tag-main" data-gid="'+esc(g.id)+'" title="'+esc(tips)+'"><span class="tag-name">'+esc(g.name)+'</span><span class="tag-n">'+(g.count||0)+' 项</span></button>'+edit+'</span>';
+ }).join('')+'<button type="button" class="tag-add" title="新建一个标签（例如「我的项目」），功能跟「下载包」完全一样，只是目录由你自己加">＋ 新建标签</button>';
+ bar.querySelectorAll('button.tag-main').forEach(b=>b.onclick=()=>switchGroup(b.dataset.gid));
+ bar.querySelectorAll('button.tag-edit').forEach(b=>b.onclick=e=>{e.stopPropagation();renameGroup(b.dataset.gid)});
+ let add=bar.querySelector('button.tag-add');if(add)add.onclick=()=>newGroup();
+}
+function renderScanBar(){
+ let bar=el('scanBar');if(!bar||!scanInfo)return;
+ let g=groupOf(activeGroup),roots=(g&&g.roots)||[],errs=scanInfo.errs||[];
+ bar.textContent=(scanInfo.force?'已重新扫描 · ':'')+'「'+activeGroupName()+'」'+roots.length+' 个目录 · 更新于 '+String(scanInfo.generatedAt||'').replace('T',' ')+(scanInfo.force?'':'（复用最近扫描结果，点“重新扫描”立即刷新）')+(errs.length?(' · '+errs.length+' 处读取失败（悬停查看）'):'');
+ if(errs.length){bar.title=errs.slice(0,8).join('\n')+(errs.length>8?'\n…':'');bar.style.color='var(--warn-fg)'}
+ else{bar.title='';bar.style.color=''}
+}
+function fillRootSelect(){
+ let sel=el('root');if(!sel)return;
+ let g=groupOf(activeGroup),roots=(g&&g.roots)||[],prev=sel.value;
+ sel.innerHTML='<option value="__add__">＋ 新增目录…</option><option value="">「'+esc(activeGroupName())+'」的全部目录</option>'+roots.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join('');
+ sel.value=(prev&&roots.indexOf(prev)>=0)?prev:'';
+}
+function switchGroup(gid){
+ if(!gid||gid===activeGroup)return;
+ activeGroup=gid;chosen.clear();naturalPaths=null;
+ if(el('q'))el('q').value='';
+ fillRootSelect();renderTags();render();refreshCounts();renderScanBar();
+ let g=groupOf(gid);
+ infoDone('已切到「'+(g?g.name:'下载包')+'」：'+(g?(g.count||0):0)+' 项，功能跟别的标签完全一样，只是看的是这一组目录',false);
+}
+async function groupCall(local,url,args,body){
+ let api=native(),d;
+ try{
+  if(api&&typeof api[local]==='function')d=await api[local].apply(api,args);
+  else d=await (await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+ }catch(e){d={ok:false,error:e.message}}
+ return d||{ok:false,error:'没有返回结果'}
+}
+async function newGroup(){
+ let bar=el('tagBar');if(!bar||bar.querySelector('.tag-input'))return;
+ let ho=document.createElement('span');ho.className='tag-wrap editing';
+ ho.innerHTML='<input class="tag-input" type="text" maxlength="12" placeholder="标签名，如：我的项目">';
+ let add=bar.querySelector('button.tag-add');
+ if(add)bar.insertBefore(ho,add);else bar.appendChild(ho);
+ let input=ho.querySelector('input');input.focus();
+ let closed=false;
+ async function finish(save){
+  if(closed)return;closed=true;
+  let text=save?input.value.trim():'';
+  if(!text){renderTags();return}
+  let d=await groupCall('add_group','/api/add_group',[text],{name:text});
+  if(!d.ok){renderTags();return toast('新建标签失败：'+(d.error||'未知错误'),true)}
+  let res=d.result||{};
+  await load(false);
+  if(res.id&&groupOf(res.id)){activeGroup=res.id;chosen.clear();naturalPaths=null;fillRootSelect();renderTags();render();refreshCounts();renderScanBar()}
+  infoDone('已新建标签「'+(res.name||text)+'」，现在在目录下拉里选「＋ 新增目录…」把目录加进来',false);
+ }
+ input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();finish(true)}else if(e.key==='Escape'){e.preventDefault();finish(false)}};
+ input.onblur=()=>finish(true);
+}
+async function renameGroup(gid){
+ let g=groupOf(gid);if(!g||g.builtin)return;
+ let bar=el('tagBar');if(!bar||bar.querySelector('.tag-input'))return;
+ let ho=null;
+ bar.querySelectorAll('.tag-wrap').forEach(w=>{let b=w.querySelector('button.tag-main');if(b&&b.dataset.gid===gid)ho=w});
+ if(!ho)return;
+ ho.className='tag-wrap editing';
+ ho.innerHTML='<input class="tag-input" type="text" maxlength="12" value="'+esc(g.name)+'">';
+ let input=ho.querySelector('input');input.focus();input.select();
+ let closed=false;
+ async function finish(save){
+  if(closed)return;closed=true;
+  let text=save?input.value.trim():'';
+  if(!text||text===g.name){renderTags();return}
+  let d=await groupCall('rename_group','/api/rename_group',[gid,text],{id:gid,name:text});
+  if(!d.ok){renderTags();return toast('改标签失败：'+(d.error||'未知错误'),true)}
+  let old=g.name;
+  for(const gg of scanGroups)if(gg.id===gid)gg.name=text;
+  for(const x of items)if((x.group||'download')===gid)x.groupName=text;
+  fillRootSelect();renderTags();render();refreshCounts();renderScanBar();
+  infoDone('标签「'+old+'」已改名为「'+text+'」',false);
+ }
+ input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();finish(true)}else if(e.key==='Escape'){e.preventDefault();finish(false)}};
+ input.onblur=()=>finish(true);
+}
+function aiBox(x){let a=x.aiDescription;let when=(a&&a.searchedAt)?'<span class="ai-when" title="这段说明生成于 '+esc(String(a.searchedAt).replace('T',' '))+(a.model?'（'+esc(a.model)+'）':'')+'">'+esc(whenAgo(a.searchedAt))+'</span>':'';let box=a?'<div class="ai"><b>这是：</b>'+esc(a.summary||'')+when+'</div>':'<span class="muted">--</span>';let note=x.note?'<div class="mynote">我的备注：'+esc(x.note)+'</div>':'<div class="note-hint">✎ 点击写备注</div>';return box+note}
 function render(){let v=visible();el('body').innerHTML=v.length?v.map(x=>'<tr data-path="'+esc(x.path)+'"><td><input class="pick" type="checkbox" data-id="'+esc(x.id)+'" '+(chosen.has(x.id)?'checked':'')+'></td><td><div class="name">'+esc(x.displayName||x.name)+(x.isNew?' <span class="new">新增</span>':'')+'</div><button class="path open-path" data-path="'+esc(x.parentPath||x.path)+'" title="打开包所在目录">所在目录：'+esc(x.parentPath||x.path)+'</button><div class="muted">'+esc(x.kind)+' · '+x.files+' 文件</div></td><td class="llm" data-path="'+esc(x.path)+'" title="点击可写备注">'+aiBox(x)+'</td><td><span class="badge '+cls(x.recommendation)+'">'+x.recommendation+(x.manualKeep?'<button class="badge-x" data-unkeep="'+esc(x.path)+'" title="取消保留（按实际情况重新评估）">✕</button>':'')+'</span></td><td><b>'+x.score+'</b></td><td>'+fmt(x.size)+'</td><td>'+esc(x.modified.slice(0,10))+'<div class="muted">'+x.ageDays+' 天前</div></td><td>'+esc(x.redownload)+'</td><td class="'+(x.suspicious?'warn':'')+'">'+esc(x.registration)+'</td><td class="why">'+x.reasons.map(esc).join('；')+'</td></tr>').join(''):'<tr><td colspan="10" class="empty">没有符合筛选条件的项目</td></tr>';document.querySelectorAll('.open-path').forEach(e=>e.onclick=async()=>{let d=await native().open_path(e.dataset.path);if(!d.ok)alert(d.error)});document.querySelectorAll('button.badge-x').forEach(b=>b.onclick=e=>{e.stopPropagation();unkeepRows([b.dataset.unkeep])});document.querySelectorAll('td.llm').forEach(td=>td.onclick=()=>editNote(td));document.querySelectorAll('.pick').forEach(e=>e.onchange=()=>{e.checked?chosen.add(e.dataset.id):chosen.delete(e.dataset.id);update()});update()}function selectedItems(){return items.filter(x=>chosen.has(x.id))}
 function selectedPaths(){return selectedItems().map(x=>x.path)}
 function update(){
@@ -67,6 +161,7 @@ function update(){
  del.title=!n?'先在左侧勾选项目，再点这里移到回收站':('把勾选的 '+n+' 项移到 Windows 回收站（还能从回收站还原）');
 }
 async function load(force){
+ infoBusy(force?'正在重新扫描全部目录…':'正在加载扫描结果…');
  el('scanBar').textContent=force?'正在全盘重新扫描…':'正在加载扫描结果…';el('scanBar').title='';el('scanBar').style.color='';
  let api=native(),timer=null;
  if(force&&api&&typeof api.scan_status==='function'){timer=setInterval(async()=>{try{let s=await api.scan_status();if(s&&s.phase)el('scanBar').textContent=s.total?('正在'+s.phase+' '+s.done+' / '+s.total+'，请稍候…'):('正在'+s.phase+'…')}catch(_){}},400)}
@@ -74,19 +169,16 @@ async function load(force){
   let d=api?await api.scan(!!force):await (await fetch('/api/scan'+(force?'?force=1':''))).json();
   if(d.error)throw Error(d.error);
   items=d.items;chosen.clear();
-  el('count').textContent=items.length;
-  el('size').textContent=fmt(items.reduce((a,x)=>a+x.size,0));
-  el('drop').textContent=items.filter(x=>x.recommendation==='不用保住').length;
-  el('risky').textContent=items.filter(x=>x.suspicious).length;
-  let prevRoot=el('root').value,roots=d.roots||[];
-  el('root').innerHTML='<option value="__add__">＋ 新增目录…</option><option value="">全部目录</option>'+roots.map(x=>'<option>'+esc(x)+'</option>').join('');
-  el('root').value=(prevRoot&&roots.indexOf(prevRoot)>=0)?prevRoot:'';
-  let errs=d.errors||[];
-  el('scanBar').textContent=(force?'已重新扫描 · ':'')+roots.length+' 个目录 · 更新于 '+String(d.generatedAt||'').replace('T',' ')+(force?'':'（复用最近扫描结果，点“重新扫描”立即刷新）')+(errs.length?(' · '+errs.length+' 处读取失败（悬停查看）'):'');
-  if(errs.length)el('scanBar').title=errs.slice(0,8).join('\n')+(errs.length>8?'\n…':'');
-  else el('scanBar').style.color='';
-  if(errs.length)el('scanBar').style.color='var(--warn-fg)';
+  scanGroups=(d.groups||[]).slice();
+  if(!scanGroups.length)scanGroups=[{id:'download',name:'下载包',roots:d.roots||[],count:items.length,builtin:true}];
+  if(!groupOf(activeGroup))activeGroup=scanGroups[0].id;
+  scanInfo={generatedAt:d.generatedAt,force:!!force,errs:d.errors||[]};
+  refreshCounts();
+  fillRootSelect();
+  renderScanBar();
   render();
+  renderTags();
+  infoDone((force?'重新扫描完成：「':'扫描完成：「')+activeGroupName()+'」'+groupItems().length+' 项'+(force?'':'（一周内复用缓存）'),false);
   if(api){
    let cfg=await api.get_settings();
    if(cfg&&cfg.ok&&cfg.result&&cfg.result.destination)lastDestination=cfg.result.destination;
@@ -104,57 +196,90 @@ async function postAction(url,payload){
 }
 
 
-/* ---------- V1.6：AI 分析进度提示（工具栏操作区左侧的空白处） ---------- */
-let aiStatusTimer = null, aiStatusHide = null, aiStatusStart = 0, aiStatusLabel = '正在分析…';
-function aiStatusShow(total) {
-	let s = el('aiStatus'), b = el('aiAnalyze');
-	aiStatusStart = Date.now();
-	aiStatusLabel = '正在分析 ' + total + ' 项…';
-	if (aiStatusTimer) { clearInterval(aiStatusTimer); aiStatusTimer = null }
-	if (aiStatusHide) { clearTimeout(aiStatusHide); aiStatusHide = null }
-	if (s) { s.className = 'ai-status show'; s.textContent = aiStatusLabel }
-	if (b) b.disabled = true;
-	aiStatusTimer = setInterval(() => {
-		let n = el('aiStatus');
-		if (!n || !n.classList.contains('show') || n.classList.contains('done')) return;
-		n.textContent = aiStatusLabel + ' · 已用 ' + Math.round((Date.now() - aiStatusStart) / 1000) + ' 秒'
+/* ---------- V1.8：工具栏左侧的信息条 ---------- */
+/* 凡是「现在要告诉用户的事」都显示在这里：AI 分析进度、扫描与整理结果等；按钮固定在右侧。 */
+let infoHideTimer = null, infoTickTimer = null, infoStart = 0, infoBusyLabel = '';
+function infoShow(text, kind) {
+	let s = el('infoBar');
+	if (!s) return;
+	if (infoHideTimer) { clearTimeout(infoHideTimer); infoHideTimer = null }
+	if (kind !== 'busy' && infoTickTimer) { clearInterval(infoTickTimer); infoTickTimer = null }
+	s.className = 'info-bar show' + (kind && kind !== 'plain' ? ' ' + kind : '');
+	s.textContent = String(text == null ? '' : text)
+}
+function infoBusy(text) {
+	infoStart = Date.now(); infoBusyLabel = String(text || '');
+	infoShow(infoBusyLabel, 'busy');
+	if (infoTickTimer) clearInterval(infoTickTimer);
+	infoTickTimer = setInterval(() => {
+		let s = el('infoBar');
+		if (!s || !s.classList.contains('busy')) return;
+		s.textContent = infoBusyLabel + ' · 已用 ' + Math.round((Date.now() - infoStart) / 1000) + ' 秒'
 	}, 1000)
 }
-function aiStatusText(text) {
-	aiStatusLabel = text;
-	let s = el('aiStatus');
-	if (s && s.classList.contains('show') && !s.classList.contains('done'))
-		s.textContent = text + ' · 已用 ' + Math.round((Date.now() - aiStatusStart) / 1000) + ' 秒'
+function infoBusyText(text) {
+	infoBusyLabel = String(text || '');
+	let s = el('infoBar');
+	if (s && s.classList.contains('busy')) s.textContent = infoBusyLabel + ' · 已用 ' + Math.round((Date.now() - infoStart) / 1000) + ' 秒'
 }
-function aiStatusEnd(text, isErr) {
-	let s = el('aiStatus'), b = el('aiAnalyze');
-	if (aiStatusTimer) { clearInterval(aiStatusTimer); aiStatusTimer = null }
-	if (b) b.disabled = false;
-	if (!s) return;
-	s.className = 'ai-status show done' + (isErr ? ' err' : '');
-	s.textContent = text;
-	let mine = s;
-	if (aiStatusHide) clearTimeout(aiStatusHide);
-	aiStatusHide = setTimeout(() => { aiStatusHide = null; mine.className = 'ai-status' }, 6000)
+function infoHideLater(ms) {
+	if (infoHideTimer) clearTimeout(infoHideTimer);
+	infoHideTimer = setTimeout(() => {
+		infoHideTimer = null;
+		if (infoTickTimer) { clearInterval(infoTickTimer); infoTickTimer = null }
+		let s = el('infoBar');
+		if (s) { s.className = 'info-bar'; s.textContent = '' }
+	}, ms == null ? 6000 : ms)
 }
-async function enrich(paths, quiet = false) {
+function infoDone(text, isErr) {
+	infoShow(text, isErr ? 'err' : 'done');
+	infoHideLater(isErr ? 9000 : 6000)
+}
+function pad2(n) { return (n < 10 ? '0' : '') + n }
+function stampOf(iso) {
+	let t = Date.parse(String(iso || '').replace(' ', 'T'));
+	return t > 0 ? t : 0
+}
+function agoFrom(ms) {
+	if (!ms) return '';
+	let s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+	if (s < 45) return '刚刚';
+	if (s < 3600) return Math.max(1, Math.round(s / 60)) + ' 分钟前';
+	if (s < 86400) return Math.round(s / 3600) + ' 小时前';
+	if (s < 2592000) return Math.round(s / 86400) + ' 天前';
+	let d = new Date(ms);
+	return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate())
+}
+function whenAgo(iso) { return agoFrom(stampOf(iso)) }
+/* 一组项目的「上次分析」：时间接近就只说一次，否则给出最近一次与最早一次 */
+function analyzedAgo(list) {
+	let stamps = (list || []).map(x => stampOf((x.aiDescription || {}).searchedAt)).filter(t => t > 0);
+	if (!stamps.length) return '';
+	let recent = Math.max.apply(null, stamps), oldest = Math.min.apply(null, stamps);
+	if (recent - oldest < 120000) return agoFrom(recent);
+	return '最近一次 ' + agoFrom(recent) + '（最早 ' + agoFrom(oldest) + '）'
+}
+async function enrich(paths, quiet = false, force = false, skipped = 0) {
 	if (!native() || !paths.length) return;
-	let errors = [];
-	aiStatusShow(paths.length);
+	let errors = [], b = el('aiAnalyze');
+	if (b) b.disabled = true;
+	infoBusy('正在分析 ' + paths.length + ' 项…');
 	for (let i = 0; i < paths.length; i += 10) {
 		let group = paths.slice(i, i + 10);
 		let span = (i + 1) + '–' + Math.min(i + group.length, paths.length);
-		aiStatusText('正在分析第 ' + span + ' 项（共 ' + paths.length + ' 项）');
+		infoBusyText('正在分析第 ' + span + ' 项（共 ' + paths.length + ' 项）');
 		el('status').textContent = 'DeepSeek 并发分析 ' + span + ' / ' + paths.length;
 		let d;
-		try { d = await native().enrich(group) } catch (e) { d = { ok: false, error: e.message } }
+		try { d = await native().enrich(group, !!force) } catch (e) { d = { ok: false, error: e.message } }
 		if (d && d.result) for (let x of items) if (d.result[x.path]) x.aiDescription = d.result[x.path];
 		render();
 		if (!d || !d.ok) errors.push(...Object.values((d && d.errors) || { error: (d && d.error) || '未知错误' }))
 	}
 	let ok = !errors.length;
-	el('status').textContent = ok ? 'DeepSeek 分析完成并已缓存' : '分析完成，失败 ' + errors.length + ' 项（可选择后重试）';
-	aiStatusEnd(ok ? ('AI 分析完成（' + paths.length + ' 项）') : ('分析完成，失败 ' + errors.length + ' 项'), !ok);
+	let tail = skipped ? ('（另 ' + skipped + ' 项已分析过，跳过）') : '';
+	el('status').textContent = ok ? ('DeepSeek 分析完成并已缓存' + (skipped ? ' · 跳过 ' + skipped + ' 项已分析过的' : '')) : ('分析完成，失败 ' + errors.length + ' 项（可选择后重试）');
+	if (b) b.disabled = false;
+	infoDone(ok ? ('AI 分析完成（' + paths.length + ' 项）' + tail) : ('分析完成，失败 ' + errors.length + ' 项，可勾选后重试'), !ok);
 	if (!ok && !quiet) alert('AI 搜索失败：' + errors.join('；'))
 }
 async function smartSearch(){
@@ -182,7 +307,7 @@ async function smartSearch(){
  }finally{
   if(version===searchVersion){button.disabled=false;button.classList.remove('searching');button.textContent='智能搜索';render()}
  }
-}async function addRoot(){let d=await native().add_manual_root();if(d.cancelled)return;if(!d.ok)return alert(d.error);alert('已添加扫描目录：'+d.result);await load(true)}
+}async function addRoot(){let d=await native().add_manual_root(activeGroup);if(d.cancelled)return;if(!d.ok)return alert(d.error);infoDone('已把目录加进「'+activeGroupName()+'」：'+d.result,false);await load(true)}
 let settingsPane='model';
 async function openSettings(pane){
  el('settingsModal').classList.add('open');
@@ -200,7 +325,7 @@ async function openSettings(pane){
  el('keyStatus').textContent=s;
 }
 function switchSettingsPane(pane){
- settingsPane=(pane==='ignore'||pane==='theme')?pane:'model';
+ settingsPane=(pane==='ignore'||pane==='theme'||pane==='guide')?pane:'model';
  document.querySelectorAll('.settings-nav .nav-item').forEach(b=>b.classList.toggle('active',b.dataset.pane===settingsPane));
  document.querySelectorAll('.settings-body .pane').forEach(p=>{p.hidden=(p.dataset.pane!==settingsPane)});
  if(settingsPane==='ignore')loadIgnorePane();
@@ -214,7 +339,7 @@ async function saveSettings(){
  if(r.keyWarning)msg+='\n\n⚠️ Key 格式提醒：'+r.keyWarning;
  el('apiKey').value='';el('settingsModal').classList.remove('open');toast(msg)
 }
-async function analyzeNow(){if(!native())return alert('AI 分析仅桌面版可用');let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoAnalyze:el('autoAnalyze').checked});if(!d.ok)return alert(d.error);let cfg=await native().get_settings();if(!cfg.ok)return alert(cfg.error);if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先填写并保存');if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后再点「立即 AI 分析」。');let missing=items.filter(x=>!x.aiDescription).map(x=>x.path);if(!missing.length)return alert('所有项目都已有 AI 说明，无需分析');el('settingsModal').classList.remove('open');toast('开始 AI 分析 '+missing.length+' 个项目，完成后会提示');await enrich(missing,false)}
+async function analyzeNow(){if(!native())return alert('AI 分析仅桌面版可用');let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoAnalyze:el('autoAnalyze').checked});if(!d.ok)return alert(d.error);let cfg=await native().get_settings();if(!cfg.ok)return alert(cfg.error);if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先填写并保存');if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后再点「立即 AI 分析」。');let missing=groupItems().filter(x=>!x.aiDescription).map(x=>x.path);if(!missing.length){let done=items.filter(x=>x.aiDescription&&x.aiDescription.searchedAt);return alert('所有项目都已有 AI 说明'+(done.length?'（'+analyzedAgo(done)+'分析过）':'')+'，不用再分析。\n想重做的话，回到表格勾选项目后按住 Shift 点工具栏的「AI 分析」。')}el('settingsModal').classList.remove('open');toast('开始 AI 分析 '+missing.length+' 个项目，完成后会提示');await enrich(missing,false)}
 
 async function action(type){
  let picked=selectedItems(),paths=picked.map(x=>x.path);
@@ -229,6 +354,7 @@ async function action(type){
    for(let x of items)if(want.has(String(x.path).toLowerCase())){x.recommendation='保留（手工）';x.score=100;x.manualKeep=true;x.reasons=['你刚标记为保留；重新扫描不会覆盖']}
    render();refreshCounts();
    el('status').textContent='已标为保留 '+paths.length+' 项';
+   infoDone('已标为保留 '+paths.length+' 项',false);
    toast('已标为保留 '+paths.length+' 项，重新扫描也不会覆盖。');
   }catch(e){toast('操作失败：'+e.message,true)}
   finally{update()}
@@ -242,6 +368,7 @@ async function action(type){
   dropItems(new Set(done.map(p=>String(p).toLowerCase())));
   refreshCounts();
   el('status').textContent='已移到回收站 '+done.length+' 项';
+   infoDone('已移到回收站 '+done.length+' 项（可从回收站还原）',false);
   toast('已移到回收站 '+done.length+' 项（可从回收站还原）');
  }catch(e){toast('操作失败：'+e.message,true)}
  finally{update()}
@@ -280,7 +407,8 @@ async function editNote(td){
   if(!d||!d.ok){toast('备注保存失败：'+((d&&d.error)||'未知错误'),true);td.innerHTML=old;return}
   if(item)item.note=(d.result&&d.result.note)||'';
   td.innerHTML=item?aiBox(item):old;
-  toast(v?'备注已保存':'备注已清除')
+  toast(v?'备注已保存':'备注已清除');
+  infoDone(v?'备注已保存':'备注已清除',false)
  };
  inp.onclick=e=>e.stopPropagation();
  inp.onblur=()=>finish(true);
@@ -290,7 +418,7 @@ async function editNote(td){
  };
 }
 /* ---------- V1.3：右键菜单 / 忽略名单 / AI 分析 ---------- */
-function refreshCounts(){el('count').textContent=items.length;el('size').textContent=fmt(items.reduce((a,x)=>a+x.size,0));el('drop').textContent=items.filter(x=>x.recommendation==='不用保住').length;el('risky').textContent=items.filter(x=>x.suspicious).length}
+function refreshCounts(){let g=groupItems();el('count').textContent=g.length;el('size').textContent=fmt(g.reduce((a,x)=>a+x.size,0));el('drop').textContent=g.filter(x=>x.recommendation==='不用保住').length;el('risky').textContent=g.filter(x=>x.suspicious).length}
 function dropItems(set){items=items.filter(x=>!set.has(String(x.path).toLowerCase()));[...chosen].forEach(id=>{if(!items.find(x=>x.id===id))chosen.delete(id)});render();refreshCounts()}
 let ctxTarget=null;
 function closeCtx(){let m=el('ctxMenu');if(m){m.classList.remove('open');m.innerHTML='';m.style.left='';m.style.top=''}}
@@ -326,14 +454,14 @@ function openCtx(ev,tr){
 }async function runCtx(act){
  let t=ctxTarget;closeCtx();if(!t)return;
  if(act==='note'){if(t.multi){toast('备注只能一行一行写：多选时请只勾选一个项目再右键。');return}let td=t.tr.querySelector('td.llm');if(td)editNote(td);return}
- if(act==='ai'){await enrichRows(t.paths);return}
+ if(act==='ai'){await aiAnalyzePaths(t.paths,false);return}
  if(act==='keep'){await keepRows(t.paths);return}
  if(act==='unkeep'){await unkeepRows(t.paths);return}
  if(act==='ignore'){await ignoreRows(t.targets);return}
  if(act==='open'){if(t.multi){toast('「打开所在目录」一次只能打开一个。');return}let d=await native().open_path(t.item.parentPath||t.item.path);if(!d||!d.ok)toast((d&&d.error)||'打开失败',true);return}
  if(act==='move'){openMoveDialog(t.paths);return}
  if(act==='del'){await deleteRows(t.paths);return}
-}async function enrichRows(paths){
+}async function enrichRows(paths,force,skipped){
  let api=native();
  if(!api||typeof api.enrich!=='function')return alert('AI 分析仅桌面版可用');
  if(!paths||!paths.length)return alert('没有需要分析的项目');
@@ -341,12 +469,28 @@ function openCtx(ev,tr){
  if(!cfg||!cfg.ok)return alert((cfg&&cfg.error)||'读取设置失败');
  if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先点右上角「模型设置」填写并保存。');
  if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后再试。');
- await enrich(paths,false)
+ await enrich(paths,false,!!force,skipped||0)
 }
-async function aiAnalyze(){
- let paths=chosen.size?items.filter(x=>chosen.has(x.id)).map(x=>x.path):items.filter(x=>!x.aiDescription).map(x=>x.path);
- if(!paths.length)return alert('所有项目都已有 AI 说明。想重做的话，先勾选项目再点「AI 分析」。');
- await enrichRows(paths)
+/* 把要分析的路径分成「需要跑的」和「已经分析过的」 */
+function aiTodo(paths,force){
+ let todo=[],analyzed=[];
+ for(let p of paths){
+  let it=items.find(x=>x.path===p);
+  if(!it)continue;
+  if(it.aiDescription&&!force)analyzed.push(it);
+  if(force||!it.aiDescription)todo.push(p)
+ }
+ return {todo:todo,analyzed:analyzed}
+}
+async function aiAnalyzePaths(paths,force){
+ let r=aiTodo(paths,force);
+ if(!r.todo.length){infoDone('这 '+r.analyzed.length+' 项上次分析过（'+analyzedAgo(r.analyzed)+'），文件没变，不用再分析。要重做就按住 Shift 点「AI 分析」。',false);return}
+ await enrichRows(r.todo,force,r.analyzed.length)
+}
+async function aiAnalyze(force){
+ let paths=chosen.size?selectedPaths():groupItems().filter(x=>!x.aiDescription).map(x=>x.path);
+ if(!paths.length){infoDone('表格里的项目都已有 AI 说明，不用再分析。想重做就先勾选项目再点「AI 分析」。',false);return}
+ await aiAnalyzePaths(paths,!!force)
 }
 async function keepRows(paths){
  let api=native();
@@ -367,6 +511,7 @@ async function ignoreRows(targets){
  for(let x of targets){let d=await api.ignore(x.name,x.path);if(!d.ok)errs.push(x.name+'：'+(d.error||'未知错误'))}
  dropItems(new Set(targets.map(x=>String(x.path).toLowerCase())));
  el('scanBar').textContent='已忽略 '+names.length+' 个项目，重新扫描时不会再出现（设置 → 忽略名单 里可恢复）';
+ infoDone('已忽略 '+names.length+' 个项目',false);
  if(errs.length)toast('部分项目忽略失败：\n'+errs.slice(0,5).join('\n'),true);
  else toast('已忽略 '+names.length+' 个项目（设置 → 忽略名单 里可恢复）')
 }
@@ -463,6 +608,7 @@ async function runMove(){
  if(moveTargets.length)btn.textContent='重试剩余 '+moveTargets.length+' 项';
  else btn.textContent='完成';
  el('status').textContent='已转移 '+done.length+' 项到 '+dest;
+ infoDone('已转移 '+done.length+' 项到 '+dest,false);
 }
 async function unkeepRows(paths){
  let api=native();
@@ -488,6 +634,7 @@ async function unkeepRows(paths){
  let miss=removed.length-n;
  toast('已取消保留 '+removed.length+' 项'+(refreshed.length?'，建议已重新评估':'')+(miss>0?('（'+miss+' 项不在当前列表，可能已被移动或忽略）'):''));
  el('status').textContent='已取消保留 '+removed.length+' 项'+(refreshed.length?'，建议已重新评估':'');
+ infoDone('已取消保留 '+removed.length+' 项',false);
 }
 const THEME_KEY='dpm-theme';
 let themeMode='system';
@@ -515,7 +662,7 @@ el('body').addEventListener('contextmenu',ev=>{let tr=ev.target.closest('tr[data
 document.addEventListener('click',ev=>{if(!ev.target.closest('#ctxMenu'))closeCtx()});
 document.addEventListener('keydown',ev=>{if(ev.key!=='Escape')return;if(el('confirmModal').classList.contains('open'))return;closeCtx();el('settingsModal').classList.remove('open');el('moveModal').classList.remove('open')});
 window.addEventListener('blur',closeCtx);
-el('aiAnalyze').onclick=aiAnalyze;
+el('aiAnalyze').onclick=e=>aiAnalyze(!!(e&&e.shiftKey));
 el('keep').onclick=()=>action('keep');
 el('unkeep').onclick=()=>{
  let paths=selectedItems().filter(x=>x.manualKeep).map(x=>x.path);

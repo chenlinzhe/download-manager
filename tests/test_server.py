@@ -18,7 +18,7 @@ class TempApp(unittest.TestCase):
         self._saved = {}
         for name in ('SETTINGS_FILE', 'LABELS_FILE', 'SNAPSHOT_FILE', 'INVENTORY_FILE',
                      'AI_CACHE_FILE', 'COLLECTION_CACHE_FILE', 'COLLECTION_FAIL_FILE',
-                     'MANUAL_ROOTS_FILE', 'NOTES_FILE', 'IGNORE_FILE'):
+                     'MANUAL_ROOTS_FILE', 'NOTES_FILE', 'IGNORE_FILE', 'GROUPS_FILE'):
             self._saved[name] = getattr(server, name)
             setattr(server, name, self.dir / (name.lower() + '.json'))
         self._roots = server.roots
@@ -596,6 +596,145 @@ class TestArchiveEntries(unittest.TestCase):
         prompt = server.description_prompt({'name': 'tool.zip'})
         self.assertIn('tool.zip', prompt)
         self.assertNotIn(u'压缩包', prompt)
+
+
+class TestEnrichForce(TempApp):
+    """AI 分析缓存：文件没变就直接复用，按住 Shift（force=True）才重做。"""
+
+    def setUp(self):
+        super().setUp()
+        self.items = [
+            {'path': 'D:/dl/WeChatSetup.exe', 'name': 'WeChatSetup.exe', 'size': 100,
+             'modified': '2026-01-01T00:00:00'},
+            {'path': 'D:/dl/Tool.zip', 'name': 'Tool.zip', 'size': 200,
+             'modified': '2026-02-02T00:00:00'},
+        ]
+        self._cache = server.CACHE
+        server.CACHE = {'items': list(self.items)}
+        self._desc = server.deepseek_description
+        self.calls = []
+
+        def fake_desc(item):
+            self.calls.append(item['path'])
+            return {'summary': u'第%d次分析的说明' % len(self.calls)}
+        server.deepseek_description = fake_desc
+        self.old = {'summary': u'很久以前的说明',
+                    'searchedAt': '2020-01-01T00:00:00', 'model': 'deepseek-chat'}
+        server.save_json_file(server.AI_CACHE_FILE, {
+            server.item_fingerprint(self.items[0]): dict(self.old)})
+
+    def tearDown(self):
+        server.deepseek_description = self._desc
+        server.CACHE = self._cache
+        super().tearDown()
+
+    def test_cache_hit_returns_without_calling_api(self):
+        out = server.enrich_items([self.items[0]['path']])
+        self.assertEqual(self.calls, [], u'文件没变就不该再花一次 API 调用')
+        self.assertTrue(out['ok'])
+        self.assertEqual(out['result'][self.items[0]['path']]['summary'], u'很久以前的说明')
+        self.assertEqual(out['result'][self.items[0]['path']]['searchedAt'], '2020-01-01T00:00:00')
+
+    def test_force_reruns_analysis_and_refreshes_time(self):
+        out = server.enrich_items([self.items[0]['path']], True)
+        self.assertEqual(self.calls, [self.items[0]['path']], u'force=True 必须真的再问一次 AI')
+        got = out['result'][self.items[0]['path']]
+        self.assertEqual(got['summary'], u'第1次分析的说明')
+        self.assertNotEqual(got['searchedAt'], '2020-01-01T00:00:00')
+        self.assertTrue(got['searchedAt'] > '2020-01-01T00:00:00')
+        saved = server.load_json_file(server.AI_CACHE_FILE, {})
+        self.assertEqual(saved[server.item_fingerprint(self.items[0])]['summary'],
+                         u'第1次分析的说明', u'重做的结果要写回缓存文件')
+
+    def test_uncached_item_is_analyzed(self):
+        out = server.enrich_items([self.items[1]['path']])
+        self.assertEqual(self.calls, [self.items[1]['path']])
+        self.assertEqual(out['result'][self.items[1]['path']]['summary'], u'第1次分析的说明')
+
+    def test_changed_file_is_not_served_from_cache(self):
+        changed = dict(self.items[0])
+        changed['size'] = 999
+        server.CACHE = {'items': [changed]}
+        out = server.enrich_items([changed['path']])
+        self.assertEqual(self.calls, [changed['path']], u'大小变了就得重新分析')
+        self.assertEqual(out['result'][changed['path']]['summary'], u'第1次分析的说明')
+
+    def test_mixed_batch_only_asks_for_missing_ones(self):
+        out = server.enrich_items([self.items[0]['path'], self.items[1]['path']])
+        self.assertEqual(self.calls, [self.items[1]['path']])
+        self.assertEqual(len(out['result']), 2)
+
+
+# -*- coding: utf-8 -*-
+class TestResourceGroups(TempApp):
+    """资源标签：第一个固定是「下载包」，用户可以自己新建（例如「我的项目」）并往里加目录。"""
+
+    def setUp(self):
+        super().setUp()
+        self.proj = self.dir / 'myproject'
+        self.proj.mkdir()
+        self.dl = self.dir / 'downloads'
+        self.dl.mkdir()
+        # 内置组的目录来源固定成一个临时目录，避免依赖真实磁盘
+        server.roots = lambda: [self.dl]
+
+    def test_first_group_is_builtin_download(self):
+        gs = server.groups()
+        self.assertEqual(gs[0]['id'], 'download')
+        self.assertEqual(gs[0]['name'], u'下载包')
+        self.assertTrue(gs[0]['builtin'])
+        self.assertEqual(gs[0]['roots'], [str(self.dl)])
+
+    def test_add_group_and_rename(self):
+        g = server.add_group(u'我的项目')
+        self.assertEqual(g['name'], u'我的项目')
+        self.assertEqual(g['roots'], [])
+        self.assertIn(u'我的项目', [x['name'] for x in server.groups()])
+        out = server.rename_group(g['id'], u'项目资料')
+        self.assertEqual(out['name'], u'项目资料')
+        self.assertIn(u'项目资料', [x['name'] for x in server.groups()])
+
+    def test_duplicate_blank_and_builtin_names_rejected(self):
+        server.add_group(u'我的项目')
+        for bad in (u'我的项目', u'   ', u'下载包'):
+            with self.assertRaises(ValueError):
+                server.add_group(bad)
+
+    def test_builtin_group_cannot_be_renamed(self):
+        with self.assertRaises(ValueError):
+            server.rename_group('download', u'别的名字')
+
+    def test_name_is_trimmed_and_capped(self):
+        self.assertEqual(server.add_group(u'  我的   项目  ')['name'], u'我的 项目')
+        self.assertEqual(len(server.add_group('x' * 80)['name']), 24,
+                         u'标签最长 24 字，避免把标签条撑坏')
+
+    def test_manual_root_goes_into_that_group(self):
+        g = server.add_group(u'我的项目')
+        server.add_manual_root(str(self.proj), g['id'])
+        row = [x for x in server.groups() if x['id'] == g['id']][0]
+        self.assertEqual(row['roots'], [str(self.proj.resolve())])
+        self.assertTrue(server.allowed(self.proj / 'inner.zip'),
+                        u'用户自己标签下的目录也要能参与保留 / 转移 / 回收站')
+        server.add_manual_root(str(self.proj))
+        self.assertIn(str(self.proj.resolve()), server.load_json_file(server.MANUAL_ROOTS_FILE, []),
+                      u'不指定标签时目录仍然加到内置的「下载包」')
+
+    def test_unknown_group_is_rejected(self):
+        with self.assertRaises(ValueError):
+            server.add_manual_root(str(self.proj), 'nope')
+
+    def test_finalize_attaches_group_summary(self):
+        g = server.add_group(u'我的项目')
+        data = server._finalize({'items': [
+            {'name': 'a.zip', 'path': str(self.dl / 'a.zip'), 'root': str(self.dl), 'size': 1},
+            {'name': 'proj1', 'path': str(self.proj / 'proj1'), 'root': str(self.proj),
+             'group': g['id'], 'size': 1}]})
+        byid = {x['id']: x for x in data['groups']}
+        self.assertEqual(byid['download']['count'], 1)
+        self.assertEqual(byid[g['id']]['count'], 1)
+        self.assertEqual(data['items'][0]['groupName'], u'下载包')
+        self.assertEqual(data['items'][1]['groupName'], u'我的项目')
 
 
 if __name__ == '__main__':

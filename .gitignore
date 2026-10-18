@@ -37,4 +37,5 @@ collection_failures.json
 user_labels.json
 user_notes.json
 manual_roots.json
+resource_groups.json
 *.tmp
