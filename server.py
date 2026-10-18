@@ -1,4 +1,4 @@
-import base64, ctypes, json, os, re, shutil, subprocess, threading, time, urllib.parse
+import base64, ctypes, json, os, re, shutil, subprocess, tarfile, threading, time, urllib.parse, zipfile
 from datetime import datetime
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -9,7 +9,7 @@ if getattr(__import__('sys'),'frozen',False):
  APP.mkdir(parents=True,exist_ok=True)
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
-APP_VERSION='1.6'
+APP_VERSION='1.7'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -357,8 +357,9 @@ def set_user_env_key(value):
 def clear_user_env_key(): return set_user_env_key('')
 
 def get_settings(reveal=False):
- cfg={'baseUrl':'https://api.deepseek.com','model':DEFAULT_MODEL,'autoSearch':True,'destination':''}
+ cfg={'baseUrl':'https://api.deepseek.com','model':DEFAULT_MODEL,'autoAnalyze':False,'destination':''}
  cfg.update(load_json_file(SETTINGS_FILE,{}))
+ cfg.pop('autoSearch',None)  # 旧版的「自动 AI 分析」开关已废弃，现由 autoAnalyze 控制（默认关闭，不再每次启动都跑分析）
  cfg['model']=MODEL_ALIASES.get(str(cfg.get('model') or '').strip().strip(),str(cfg.get('model') or '').strip() or DEFAULT_MODEL)
  file_key=unprotect_key(cfg.get('apiKeyEnc')) or str(cfg.get('apiKey') or '')
  env_key=env_api_key()
@@ -388,7 +389,8 @@ def save_settings(data):
   stored='env' if set_user_env_key(existing) else 'file'  # 老版本存在文件里的 Key，顺手迁移进环境变量
  old['baseUrl']=str(data.get('baseUrl') or old['baseUrl']).strip().rstrip('/')
  old['model']=str(data.get('model') or old['model']).strip()
- old['autoSearch']=bool(data.get('autoSearch',old.get('autoSearch',True)))
+ old.pop('autoSearch',None)
+ old['autoAnalyze']=bool(data.get('autoAnalyze',old.get('autoAnalyze',False)))
  old['destination']=str(data.get('destination') or old.get('destination') or '').strip()
  for name in _DERIVED: old.pop(name,None)
  if stored=='file':
@@ -442,11 +444,58 @@ def test_connection(baseUrl=None, model=None, apiKey=None):
 
 def item_fingerprint(item): return '|'.join([item['name'].lower(),str(item['size']),item['modified']])
 
+ARCHIVE_KINDS={'.zip','.whl','.crx','.jar','.tar','.gz','.tgz','.bz2','.xz','.7z','.rar','.iso'}
+def archive_entry_list(path,limit=24):
+ """只读压缩包里的文件清单：不解压、不写磁盘，读不到就返回空列表。"""
+ if not path: return []
+ p=Path(path)
+ try:
+  if not p.is_file(): return []
+ except OSError: return []
+ suffix=p.suffix.lower(); names=[]
+ try:
+  if suffix in ('.zip','.whl','.crx','.jar') or zipfile.is_zipfile(str(p)):
+   with zipfile.ZipFile(str(p)) as z:
+    for info in z.infolist():
+     if info.is_dir(): continue
+     names.append(info.filename)
+     if len(names)>=limit: break
+  elif suffix in ('.tar','.gz','.tgz','.bz2','.xz'):
+   with tarfile.open(str(p)) as t:
+    for m in t:
+     if not m.isfile(): continue
+     names.append(m.name)
+     if len(names)>=limit: break
+  elif suffix in ARCHIVE_KINDS:
+   # rar / 7z / iso：交给 Windows 自带的 tar（bsdtar 能读这几类压缩包的清单）
+   flags=getattr(subprocess,'CREATE_NO_WINDOW',0)
+   out=subprocess.run(['tar','-tf',str(p)],capture_output=True,timeout=30,creationflags=flags)
+   for line in (out.stdout or b'').decode('utf-8','replace').splitlines():
+    line=line.strip()
+    if not line or line.endswith('/') or line.endswith('\\'): continue
+    names.append(line)
+    if len(names)>=limit: break
+ except Exception:
+  return []
+ cleaned=[]
+ for n in names:
+  n=str(n).replace('\\','/').strip()
+  if not n: continue
+  cleaned.append(n if len(n)<=60 else n[:57]+u'\u2026')
+ return cleaned
+
+def description_prompt(item):
+ prompt=('根据下载包名判断这是什么。只返回严格JSON：{"summary":"10至15个中文字的简短描述"}。'
+         '必须给出最可能判断，不能回答无法确认或复述文件名。包名：%s')%item.get('name','')
+ inside=archive_entry_list(item.get('path'))
+ if inside: prompt+='；压缩包里主要有这些文件：'+'、'.join(inside)
+ return prompt
+
 def deepseek_description(item):
  import urllib.request
  cfg=get_settings(True); key=cfg.get('apiKey','')
  if not key: raise ValueError('尚未配置 DeepSeek API Key，请打开「模型设置」填写。')
- prompt=('根据下载包名判断这是什么。只返回严格JSON：{\"summary\":\"10至15个中文字的简短描述\"}。必须给出最可能判断，不能回答无法确认或复述文件名。包名：%s')%item['name']
+ prompt=description_prompt(item)
  body=json.dumps({'model':cfg['model'],'messages':[{'role':'user','content':prompt}],'temperature':0.1,'response_format':{'type':'json_object'}}).encode()
  req=urllib.request.Request(cfg['baseUrl']+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
  try: response=json.loads(urllib.request.urlopen(req,timeout=30).read().decode('utf-8'))

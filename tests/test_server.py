@@ -217,7 +217,7 @@ class TestSettings(TempApp):
         return json.loads(server.SETTINGS_FILE.read_text(encoding='utf-8'))
 
     def test_key_goes_to_env_not_to_file(self):
-        out = server.save_settings({'apiKey': 'sk-' + 'a' * 32, 'autoSearch': False})
+        out = server.save_settings({'apiKey': 'sk-' + 'a' * 32, 'autoAnalyze': False})
         self.assertEqual(out['keyStoredIn'], 'env')
         self.assertEqual(self.env.stored[server.ENV_KEY_NAME], 'sk-' + 'a' * 32)
         raw = self._raw()
@@ -236,12 +236,12 @@ class TestSettings(TempApp):
         self.assertEqual(server.get_settings(True)['apiKey'], 'sk-' + 'b' * 32)
 
     def test_clear_key_removes_env_and_file(self):
-        server.save_settings({'apiKey': 'sk-' + 'c' * 32, 'autoSearch': False})
+        server.save_settings({'apiKey': 'sk-' + 'c' * 32, 'autoAnalyze': False})
         server.save_settings({'clearApiKey': True})
         self.assertEqual(server.get_settings(True)['apiKey'], '')
         self.assertFalse(server.get_settings(False)['apiKeyMasked'])
         self.assertNotIn('apiKeyEnc', self._raw())
-        self.assertFalse(server.get_settings(True)['autoSearch'], '清除 Key 不应把 autoSearch 打回 True')
+        self.assertFalse(server.get_settings(True)['autoAnalyze'], '清除 Key 不应把 autoAnalyze 打回 True')
 
     def test_env_key_wins_over_file(self):
         server.SETTINGS_FILE.write_text(json.dumps({'apiKeyEnc': server.protect_key('sk-file')}), encoding='utf-8')
@@ -251,7 +251,7 @@ class TestSettings(TempApp):
 
     def test_legacy_file_key_migrates_to_env_on_save(self):
         server.SETTINGS_FILE.write_text(json.dumps({'apiKey': 'sk-legacy'}), encoding='utf-8')
-        out = server.save_settings({'autoSearch': True})
+        out = server.save_settings({'autoAnalyze': True})
         self.assertEqual(out['keyStoredIn'], 'env')
         self.assertEqual(self.env.stored[server.ENV_KEY_NAME], 'sk-legacy')
         self.assertNotIn('apiKey', self._raw())
@@ -513,6 +513,89 @@ class TestConnectionProbe(TempApp):
         self.assertFalse(out['ok'])
         self.assertIn('aaaa', out['error'])
         self.assertIn(u'模型设置', out['error'])
+
+
+class TestAutoAnalyzeSwitch(TempApp):
+    """启动时自动 AI 分析：默认关闭，旧版的开关不再生效。"""
+
+    def setUp(self):
+        super().setUp()
+        self._env_key = server.env_api_key
+        server.env_api_key = lambda: ''
+
+    def tearDown(self):
+        server.env_api_key = self._env_key
+        super().tearDown()
+
+    def test_default_is_off(self):
+        self.assertFalse(server.get_settings(True)['autoAnalyze'])
+
+    def test_legacy_autoSearch_on_is_ignored(self):
+        server.SETTINGS_FILE.write_text(json.dumps({'autoSearch': True}), encoding='utf-8')
+        cfg = server.get_settings(True)
+        self.assertFalse(cfg['autoAnalyze'], '旧版 autoSearch=true 不该再让软件每次启动都分析')
+        self.assertNotIn('autoSearch', cfg)
+
+    def test_switch_can_be_turned_on_and_persists(self):
+        server.save_settings({'autoAnalyze': True})
+        self.assertTrue(server.get_settings(True)['autoAnalyze'])
+        server.save_settings({'baseUrl': 'https://api.deepseek.com'})
+        self.assertTrue(server.get_settings(True)['autoAnalyze'], '保存其它设置不该把开关打回 False')
+        self.assertNotIn('autoSearch', json.loads(server.SETTINGS_FILE.read_text(encoding='utf-8')))
+
+
+class TestArchiveEntries(unittest.TestCase):
+    """AI 分析前只读压缩包里的文件清单（不解压到磁盘）。"""
+
+    def test_lists_zip_entries_without_extracting(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / 'WeChatSetup.zip'
+            with zipfile.ZipFile(str(p), 'w') as z:
+                z.writestr('WeChat.exe', b'x' * 10)
+                z.writestr('readme.txt', 'hello')
+                z.writestr('plugins/', '')
+            names = server.archive_entry_list(str(p))
+            self.assertIn('WeChat.exe', names)
+            self.assertIn('readme.txt', names)
+            self.assertFalse([n for n in names if n.endswith('/')], '目录项不该进清单')
+            self.assertEqual([f.name for f in Path(td).iterdir()], ['WeChatSetup.zip'],
+                             '不该把压缩包解压出任何文件')
+
+    def test_empty_for_non_archive_missing_and_blank(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / 'note.txt'
+            p.write_text('hello', encoding='utf-8')
+            self.assertEqual(server.archive_entry_list(str(p)), [])
+            self.assertEqual(server.archive_entry_list(str(Path(td) / 'nope.zip')), [])
+        self.assertEqual(server.archive_entry_list(''), [])
+        self.assertEqual(server.archive_entry_list(None), [])
+
+    def test_entry_list_is_capped(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / 'many.zip'
+            with zipfile.ZipFile(str(p), 'w') as z:
+                for i in range(40):
+                    z.writestr('f%02d.txt' % i, 'x')
+            self.assertEqual(len(server.archive_entry_list(str(p), limit=5)), 5)
+
+    def test_description_prompt_mentions_archive_contents(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / 'WeChatSetup.zip'
+            with zipfile.ZipFile(str(p), 'w') as z:
+                z.writestr('WeChat.exe', b'x')
+            prompt = server.description_prompt({'name': 'WeChatSetup.zip', 'path': str(p)})
+            self.assertIn('WeChatSetup.zip', prompt)
+            self.assertIn('WeChat.exe', prompt)
+            self.assertIn(u'压缩包', prompt)
+            self.assertIn('summary', prompt)
+
+    def test_description_prompt_without_archive_stays_short(self):
+        prompt = server.description_prompt({'name': 'tool.zip'})
+        self.assertIn('tool.zip', prompt)
+        self.assertNotIn(u'压缩包', prompt)
 
 
 if __name__ == '__main__':

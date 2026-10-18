@@ -51,8 +51,16 @@ main{max-width:1560px;margin:0 auto;padding:20px 24px 32px}
 #risky.tone-danger{color:var(--danger-fg)}
 .toolbar{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
 .toolbar .group{display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-width:0}
-.toolbar .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-left:auto;padding-left:12px;border-left:1px solid var(--border)}
+.toolbar .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-left:auto;padding-left:12px;border-left:1px solid var(--border);flex:1 1 auto}
 .selected{color:var(--fg-muted);font-size:13px;white-space:nowrap}
+/* AI 分析进度：占住操作区左侧的空白，正在分析时在这里显示 */
+.ai-status{display:none;align-items:center;gap:7px;margin-right:auto;font-size:13px;font-weight:500;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:44vw}
+.ai-status.show{display:inline-flex}
+.ai-status.show::before{content:'';flex:0 0 auto;width:8px;height:8px;border-radius:999px;background:var(--accent);animation:aiPulse 1.1s var(--ease) infinite}
+.ai-status.done{color:var(--fg-muted)}
+.ai-status.done.err{color:var(--danger-fg)}
+.ai-status.done::before{animation:none;opacity:.5}
+@keyframes aiPulse{0%,100%{opacity:.25;transform:scale(.7)}50%{opacity:1;transform:scale(1)}}
 .spacer{flex:1}
 button{cursor:pointer;border:1px solid var(--border-strong);background:var(--surface);color:var(--fg);border-radius:var(--radius-sm);padding:6px 12px;font-weight:500;line-height:1.4;transition:background-color .15s var(--ease),border-color .15s var(--ease),color .15s var(--ease),opacity .15s var(--ease)}
 button:hover:not(:disabled){background:var(--surface-2)}
@@ -169,7 +177,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </head>
 <body>
 <header>
- <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V1.6</span></div>
+ <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V1.7</span></div>
  <div class="header-right">
   <span id="status">准备加载…</span>
   <button id="themeBtn" class="icon-btn" title="切换深色 / 浅色主题（也可以在设置 → 外观与主题里选跟随系统）" aria-label="切换主题">&#9790;</button>
@@ -206,6 +214,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    <button id="rescan" title="立刻重新扫描全部目录：重新读取文件、大小与注册信息（大约几十秒）">重新扫描</button>
   </div>
   <div class="actions">
+   <span id="aiStatus" class="ai-status" aria-live="polite"></span>
    <span id="selected" class="selected">已选 0 项</span>
    <button id="aiAnalyze" title="对勾选的项目做 DeepSeek 分析；未勾选时分析所有还没有 AI 说明的项目">AI 分析</button>
    <button id="keep" title="把勾选的项目标为保留：永久留用，不再出现在清理建议里" disabled>标为保留</button>
@@ -241,7 +250,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    <button type="button" class="nav-item active" data-pane="model" title="DeepSeek 的 API Key、API 地址与模型">模型设置</button>
    <button type="button" class="nav-item" data-pane="ignore" title="查看并撤销被忽略的项目名字">忽略名单</button>
    <button type="button" class="nav-item" data-pane="theme" title="跟随系统 / 浅色 / 深色">外观与主题</button>
-   <div class="nav-foot">下载包管家 V1.6<br>程序不会运行任何安装包</div>
+   <div class="nav-foot">下载包管家 V1.7<br>程序不会运行任何安装包</div>
   </nav>
   <section class="settings-body">
    <div class="pane" data-pane="model">
@@ -265,7 +274,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
      <button id="testConn" title="用当前填写的 Key 与模型向 DeepSeek 发一次请求，验证能不能连通">测试连接</button>
      <small id="testResult" class="muted"></small>
     </div>
-    <label class="chk" title="扫描完成后自动给还没有 AI 说明的新项目补上说明"><input id="autoSearch" type="checkbox" checked> 自动 AI 分析</label>
+    <label class="chk" title="默认关闭：只有勾上才会在软件启动时自动分析缺少 AI 说明的项目；不勾就只在你自己点「AI 分析」/「立即 AI 分析」时才跑"><input id="autoAnalyze" type="checkbox"> 启动时自动分析缺少说明的项目（默认关闭）</label>
     <div class="dialog-actions">
      <button id="clearKey" class="danger" title="删除本机环境变量 DEEPSEEK_API_KEY 与配置文件里的残留">清除 Key</button>
      <span class="spacer"></span>
@@ -325,6 +334,6 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="ctxMenu" class="ctx-menu"></div>
-<script src="app.js?v=20260820-10"></script>
+<script src="app.js?v=20260820-11"></script>
 </body>
 </html>

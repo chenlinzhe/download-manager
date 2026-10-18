@@ -91,7 +91,7 @@ async function load(force){
    let cfg=await api.get_settings();
    if(cfg&&cfg.ok&&cfg.result&&cfg.result.destination)lastDestination=cfg.result.destination;
    let missing=items.filter(x=>!x.aiDescription&&(force?x.isNew:true)).map(x=>x.path);
-   if(cfg&&cfg.ok&&cfg.result.autoSearch&&cfg.result.apiKeyMasked&&missing.length)enrich(missing,true)
+   if(cfg&&cfg.ok&&cfg.result.autoAnalyze&&cfg.result.apiKeyMasked&&missing.length)enrich(missing,true)
   }
  }catch(e){
   el('scanBar').textContent='加载失败';el('body').innerHTML='<tr><td colspan="10" class="empty">'+esc(e.message)+'</td></tr>'
@@ -104,7 +104,59 @@ async function postAction(url,payload){
 }
 
 
-async function enrich(paths,quiet=false){if(!native()||!paths.length)return;let errors=[];for(let i=0;i<paths.length;i+=10){let group=paths.slice(i,i+10);el('status').textContent='DeepSeek 并发分析 '+(i+1)+'–'+Math.min(i+group.length,paths.length)+' / '+paths.length;let d=await native().enrich(group);if(d.result)for(let x of items)if(d.result[x.path])x.aiDescription=d.result[x.path];render();if(!d.ok)errors.push(...Object.values(d.errors||{error:d.error||'未知错误'}))}el('status').textContent=errors.length?'分析完成，失败 '+errors.length+' 项（可选择后重试）':'DeepSeek 分析完成并已缓存';if(errors.length&&!quiet)alert('AI 搜索失败：'+errors.join('；'))}
+/* ---------- V1.6：AI 分析进度提示（工具栏操作区左侧的空白处） ---------- */
+let aiStatusTimer = null, aiStatusHide = null, aiStatusStart = 0, aiStatusLabel = '正在分析…';
+function aiStatusShow(total) {
+	let s = el('aiStatus'), b = el('aiAnalyze');
+	aiStatusStart = Date.now();
+	aiStatusLabel = '正在分析 ' + total + ' 项…';
+	if (aiStatusTimer) { clearInterval(aiStatusTimer); aiStatusTimer = null }
+	if (aiStatusHide) { clearTimeout(aiStatusHide); aiStatusHide = null }
+	if (s) { s.className = 'ai-status show'; s.textContent = aiStatusLabel }
+	if (b) b.disabled = true;
+	aiStatusTimer = setInterval(() => {
+		let n = el('aiStatus');
+		if (!n || !n.classList.contains('show') || n.classList.contains('done')) return;
+		n.textContent = aiStatusLabel + ' · 已用 ' + Math.round((Date.now() - aiStatusStart) / 1000) + ' 秒'
+	}, 1000)
+}
+function aiStatusText(text) {
+	aiStatusLabel = text;
+	let s = el('aiStatus');
+	if (s && s.classList.contains('show') && !s.classList.contains('done'))
+		s.textContent = text + ' · 已用 ' + Math.round((Date.now() - aiStatusStart) / 1000) + ' 秒'
+}
+function aiStatusEnd(text, isErr) {
+	let s = el('aiStatus'), b = el('aiAnalyze');
+	if (aiStatusTimer) { clearInterval(aiStatusTimer); aiStatusTimer = null }
+	if (b) b.disabled = false;
+	if (!s) return;
+	s.className = 'ai-status show done' + (isErr ? ' err' : '');
+	s.textContent = text;
+	let mine = s;
+	if (aiStatusHide) clearTimeout(aiStatusHide);
+	aiStatusHide = setTimeout(() => { aiStatusHide = null; mine.className = 'ai-status' }, 6000)
+}
+async function enrich(paths, quiet = false) {
+	if (!native() || !paths.length) return;
+	let errors = [];
+	aiStatusShow(paths.length);
+	for (let i = 0; i < paths.length; i += 10) {
+		let group = paths.slice(i, i + 10);
+		let span = (i + 1) + '–' + Math.min(i + group.length, paths.length);
+		aiStatusText('正在分析第 ' + span + ' 项（共 ' + paths.length + ' 项）');
+		el('status').textContent = 'DeepSeek 并发分析 ' + span + ' / ' + paths.length;
+		let d;
+		try { d = await native().enrich(group) } catch (e) { d = { ok: false, error: e.message } }
+		if (d && d.result) for (let x of items) if (d.result[x.path]) x.aiDescription = d.result[x.path];
+		render();
+		if (!d || !d.ok) errors.push(...Object.values((d && d.errors) || { error: (d && d.error) || '未知错误' }))
+	}
+	let ok = !errors.length;
+	el('status').textContent = ok ? 'DeepSeek 分析完成并已缓存' : '分析完成，失败 ' + errors.length + ' 项（可选择后重试）';
+	aiStatusEnd(ok ? ('AI 分析完成（' + paths.length + ' 项）') : ('分析完成，失败 ' + errors.length + ' 项'), !ok);
+	if (!ok && !quiet) alert('AI 搜索失败：' + errors.join('；'))
+}
 async function smartSearch(){
  let q=el('q').value.trim(),version=++searchVersion,button=el('smartSearch'),message=el('searchStatus');
  if(!q){naturalPaths=null;message.textContent='请输入搜索内容';render();return}
@@ -140,7 +192,7 @@ async function openSettings(pane){
  let d;try{d=await api.get_settings()}catch(e){d={ok:false,error:e.message}}
  if(!d||!d.ok)return toast('读取设置失败：'+((d&&d.error)||'未知错误'),true);
  let c=d.result||{};
- el('baseUrl').value=c.baseUrl||'';el('model').value=c.model||'';el('autoSearch').checked=!!c.autoSearch;el('apiKey').value='';
+ el('baseUrl').value=c.baseUrl||'';el('model').value=c.model||'';el('autoAnalyze').checked=!!c.autoAnalyze;el('apiKey').value='';
  let src=c.keySource==='env'?'（来自环境变量 '+c.keyName+'）':(c.keySource==='file'?'（存在本机配置文件里，建议改成环境变量）':'');
  let s=c.apiKeyMasked?('已配置：'+c.apiKeyMasked+src):'尚未配置';
  if(c.keyFormatProblem){s+='　⚠️ '+c.keyFormatProblem;el('keyStatus').style.color='var(--danger-fg)'}
@@ -155,14 +207,14 @@ function switchSettingsPane(pane){
  else if(settingsPane==='theme')syncThemeButtons();
 }
 async function saveSettings(){
- let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoSearch:el('autoSearch').checked});
+ let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoAnalyze:el('autoAnalyze').checked});
  if(!d.ok)return alert(d.error);let r=d.result||{};let msg='设置已保存';
  if(r.keyStoredIn==='env')msg+='\nAPI Key 已写入本机环境变量 '+r.keyName+'（不落盘、不进 Git）';
  else if(r.keyStoredIn==='file')msg+='\n⚠️ 写入环境变量失败，API Key 暂存在本机加密文件里';
  if(r.keyWarning)msg+='\n\n⚠️ Key 格式提醒：'+r.keyWarning;
  el('apiKey').value='';el('settingsModal').classList.remove('open');toast(msg)
 }
-async function analyzeNow(){if(!native())return alert('AI 分析仅桌面版可用');let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoSearch:el('autoSearch').checked});if(!d.ok)return alert(d.error);let cfg=await native().get_settings();if(!cfg.ok)return alert(cfg.error);if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先填写并保存');if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后再点「立即 AI 分析」。');let missing=items.filter(x=>!x.aiDescription).map(x=>x.path);if(!missing.length)return alert('所有项目都已有 AI 说明，无需分析');el('settingsModal').classList.remove('open');toast('开始 AI 分析 '+missing.length+' 个项目，完成后会提示');await enrich(missing,false)}
+async function analyzeNow(){if(!native())return alert('AI 分析仅桌面版可用');let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoAnalyze:el('autoAnalyze').checked});if(!d.ok)return alert(d.error);let cfg=await native().get_settings();if(!cfg.ok)return alert(cfg.error);if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先填写并保存');if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后再点「立即 AI 分析」。');let missing=items.filter(x=>!x.aiDescription).map(x=>x.path);if(!missing.length)return alert('所有项目都已有 AI 说明，无需分析');el('settingsModal').classList.remove('open');toast('开始 AI 分析 '+missing.length+' 个项目，完成后会提示');await enrich(missing,false)}
 
 async function action(type){
  let picked=selectedItems(),paths=picked.map(x=>x.path);
