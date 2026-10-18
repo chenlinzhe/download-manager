@@ -2,7 +2,7 @@
 """下载包管家 - server 纯逻辑单元测试（stdlib unittest，无需额外依赖）。
 运行：python -m unittest discover -s tests -v
 """
-import io, json, os, sys, tempfile, unittest, urllib.error, urllib.request
+import io, json, os, sys, tempfile, threading, time, unittest, urllib.error, urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -805,6 +805,138 @@ class TestAddManualRoots(TempApp):
         out = server.add_manual_roots([], g['id'])
         self.assertEqual((out['added'], out['skipped'], out['failed']), ([], [], []))
         self.assertEqual([x for x in server.groups() if x['id'] == g['id']][0]['roots'], [])
+
+class TestScanCache(TempApp):
+    """回归（V1.9 的 bug）：加了目录之后点扫描必须真的变新，不能拿旧快照 / 旧内存缓存糊弄。"""
+
+    def setUp(self):
+        super().setUp()
+        self.root_a = self.dir / 'rootA'
+        (self.root_a / 'alpha').mkdir(parents=True)
+        (self.root_a / 'alpha' / 'a.zip').write_bytes(b'x')
+        self.root_b = self.dir / 'rootB'
+        (self.root_b / 'gamma').mkdir(parents=True)
+        (self.root_b / 'gamma' / 'c.zip').write_bytes(b'x')
+        self._classify = server.classify_first_level
+        server.classify_first_level = lambda children: {}
+        self._cache = server.CACHE
+        server.CACHE = {}
+        self.group = server.add_group(u'我的项目')
+
+    def tearDown(self):
+        server.classify_first_level = self._classify
+        server.CACHE = self._cache
+        super().tearDown()
+
+    def names(self, data):
+        return sorted(x['name'] for x in data['items'])
+
+    def test_new_folder_shows_up_without_forced_rescan(self):
+        server.add_manual_roots([str(self.root_a)], self.group['id'])
+        self.assertEqual(self.names(server.scan(False)), ['alpha'])
+        server.add_manual_roots([str(self.root_b)], self.group['id'])
+        data = server.scan(False)
+        self.assertEqual(self.names(data), ['alpha', 'gamma'],
+                         u'目录清单变了就必须重扫，不能复用 7 天内的旧快照')
+        self.assertFalse(data.get('reused'), u'这是刚扫出来的，界面上不能写「复用」')
+
+    def test_unchanged_roots_still_reuse_snapshot(self):
+        server.add_manual_roots([str(self.root_a)], self.group['id'])
+        first = server.scan(False)
+        second = server.scan(False)
+        self.assertEqual(first['generatedAt'], second['generatedAt'], u'清单没变就该复用，保持打开速度快')
+        self.assertFalse(first.get('reused'), u'第一次是真扫')
+        self.assertTrue(second.get('reused'), u'第二次是复用，界面据此写「复用最近扫描结果」')
+
+    def test_removed_folder_disappears(self):
+        server.add_manual_roots([str(self.root_a), str(self.root_b)], self.group['id'])
+        self.assertEqual(self.names(server.scan(False)), ['alpha', 'gamma'])
+        server.add_manual_roots([], self.group['id'])
+        server.save_json_file(server.GROUPS_FILE, [{'id': self.group['id'], 'name': u'我的项目', 'roots': [str(self.root_a)]}])
+        self.assertEqual(self.names(server.scan(False)), ['alpha'], u'删掉目录后旧列表不能继续留着')
+
+    def test_forced_scan_waits_instead_of_returning_stale_cache(self):
+        server.add_manual_roots([str(self.root_a)], self.group['id'])
+        server.scan(True)
+        self.assertEqual(self.names(server.scan(False)), ['alpha'])
+        server.add_manual_roots([str(self.root_b)], self.group['id'])
+        hold = threading.Event()
+        release = threading.Event()
+
+        def hold_lock():
+            server.SCAN_LOCK.acquire()
+            hold.set()
+            release.wait(15)
+            server.SCAN_LOCK.release()
+
+        worker = threading.Thread(target=hold_lock)
+        worker.start()
+        self.assertTrue(hold.wait(5))
+        threading.Timer(0.4, release.set).start()
+        threading.Timer(12, release.set).start()   # 保险：测试绝不能挂死
+        data = server.scan(True)
+        release.set()
+        worker.join(15)
+        self.assertEqual(self.names(data), ['alpha', 'gamma'],
+                         u'上一次扫描还没跑完时再点「重新扫描」，必须等它结束并给出真正的新结果')
+        self.assertEqual(server.scan_status().get('phase'), '', u'结束后进度要清空')
+
+
+class TestScanAiSwitch(TempApp):
+    """扫描是否允许调用 AI：默认关闭（纯本地），打开后才会问 DeepSeek。"""
+
+    def setUp(self):
+        super().setUp()
+        self.root = self.dir / 'dl'
+        (self.root / 'project-x' / 'src').mkdir(parents=True)
+        (self.root / 'project-x' / 'docs').mkdir()
+        self.group = server.add_group(u'我的项目')
+        server.add_manual_roots([str(self.root)], self.group['id'])
+        self._cache = server.CACHE
+        server.CACHE = {}
+        self.calls = []
+        self._classify = server.classify_collection
+        server.classify_collection = self._fake_classify
+
+    def _fake_classify(self, path):
+        self.calls.append(str(path))
+        return {'isCollection': True, 'reason': u'多个独立包'}
+
+    def tearDown(self):
+        server.classify_collection = self._classify
+        server.CACHE = self._cache
+        super().tearDown()
+
+    def test_switch_defaults_to_off(self):
+        self.assertFalse(server.get_settings(True).get('scanAI'))
+        self.assertFalse(server.scan_ai_enabled())
+
+    def test_switch_persists(self):
+        out = server.save_settings({'scanAI': True})
+        self.assertTrue(out.get('scanAI'))
+        self.assertTrue(server.get_settings(True)['scanAI'])
+        self.assertTrue(server.scan_ai_enabled())
+
+    def test_scan_does_not_call_ai_by_default(self):
+        data = server.scan(True)
+        self.assertEqual(self.calls, [], u'扫描默认不该联网问 AI')
+        row = [x for x in data['items'] if x['name'] == 'project-x'][0]
+        self.assertTrue(row.get('collectionPending'), u'拿不准的目录要标记成待判断')
+
+    def test_switch_on_judges_and_expands(self):
+        server.save_settings({'scanAI': True})
+        data = server.scan(True)
+        self.assertEqual(len(self.calls), 1, u'打开开关后每个拿不准的目录问一次')
+        self.assertEqual(sorted(x['name'] for x in data['items']), ['docs', 'src'])
+
+    def test_local_rule_still_expands_without_ai(self):
+        packs = self.root / 'packs'
+        packs.mkdir()
+        (packs / 'a.zip').write_bytes(b'x')
+        (packs / 'b.zip').write_bytes(b'x')
+        data = server.scan(True)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(sorted(x['name'] for x in data['items']), ['a.zip', 'b.zip', 'project-x'])
 
 
 if __name__ == '__main__':

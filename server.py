@@ -10,7 +10,7 @@ if getattr(__import__('sys'),'frozen',False):
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
 GROUPS_FILE=APP/'resource_groups.json'
-APP_VERSION='1.9'
+APP_VERSION='2.0'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -20,6 +20,10 @@ PROGRESS={'phase':'','done':0,'total':0,'at':0.0}
 def set_progress(phase,done=0,total=0):
  PROGRESS.update(phase=phase,done=done,total=total,at=time.time())
 def scan_status(): return dict(PROGRESS)
+def scan_ai_enabled():
+ """扫描时是否让 AI 判断「一级目录是不是多个包的集合」。默认关闭：扫描纯本地、不联网、不花钱。"""
+ try: return bool(load_json_file(SETTINGS_FILE,{}).get('scanAI'))
+ except Exception: return False
 NAMES={'down','download','downloads','downloda'}
 def download_dir(name):
  low=name.lower()
@@ -483,7 +487,7 @@ def set_user_env_key(value):
 def clear_user_env_key(): return set_user_env_key('')
 
 def get_settings(reveal=False):
- cfg={'baseUrl':'https://api.deepseek.com','model':DEFAULT_MODEL,'autoAnalyze':False,'destination':''}
+ cfg={'baseUrl':'https://api.deepseek.com','model':DEFAULT_MODEL,'autoAnalyze':False,'scanAI':False,'destination':''}
  cfg.update(load_json_file(SETTINGS_FILE,{}))
  cfg.pop('autoSearch',None)  # 旧版的「自动 AI 分析」开关已废弃，现由 autoAnalyze 控制（默认关闭，不再每次启动都跑分析）
  cfg['model']=MODEL_ALIASES.get(str(cfg.get('model') or '').strip().strip(),str(cfg.get('model') or '').strip() or DEFAULT_MODEL)
@@ -517,6 +521,7 @@ def save_settings(data):
  old['model']=str(data.get('model') or old['model']).strip()
  old.pop('autoSearch',None)
  old['autoAnalyze']=bool(data.get('autoAnalyze',old.get('autoAnalyze',False)))
+ old['scanAI']=bool(data.get('scanAI',old.get('scanAI',False)))
  old['destination']=str(data.get('destination') or old.get('destination') or '').strip()
  for name in _DERIVED: old.pop(name,None)
  if stored=='file':
@@ -709,13 +714,18 @@ def collection_prejudge(p):
  return None
 
 def classify_first_level(children):
- cache=load_json_file(COLLECTION_CACHE_FILE,{}); fails=load_json_file(COLLECTION_FAIL_FILE,{})
+ """判断一级目录是不是「多个相互独立下载包的集合」。
+ 默认纯本地：先用零成本的 collection_prejudge，再用以前缓存下来的 AI 结论，都不产生新请求。
+ 只有设置里打开「扫描时用 AI 判断」才真的联网问 DeepSeek。"""
+ cache=load_json_file(COLLECTION_CACHE_FILE,{}); fails=load_json_file(COLLECTION_FAIL_FILE,{}); use_ai=scan_ai_enabled()
  now=time.time(); folders=[p for p in children if p.is_dir()]; results={}; pending=[]
  for p in folders:
   hint=collection_prejudge(p)
   if hint is not None: results[str(p)]=hint; continue
   sig=collection_signature(p)
   if sig in cache: results[str(p)]=cache[sig]; continue
+  if not use_ai:
+   results[str(p)]={'isCollection':False,'reason':'没做 AI 判断，先当成一个整体','pending':True}; continue
   if now-fails.get(sig,0)<AI_FAIL_TTL:
    results[str(p)]={'isCollection':False,'reason':'AI 暂不可用，先不展开'}; continue
   pending.append((p,sig))
@@ -947,32 +957,49 @@ def save_keep(paths):
   _patch_cached_items(refreshed)
  return marked
 
+def roots_signature(gs=None):
+ """资源标签 + 目录清单的指纹。清单一变，旧的扫描结果就不能再复用。"""
+ rows=gs if gs is not None else groups()
+ out=[]
+ for g in rows:
+  roots=sorted(str(r).replace('/','\\').rstrip('\\').lower() for r in (g.get('roots') or []))
+  out.append([str(g.get('id') or ''),str(g.get('name') or ''),roots])
+ return out
+
+def snapshot_is_current(snap):
+ if not isinstance(snap,dict) or not isinstance(snap.get('items'),list): return False
+ return snap.get('rootSig')==roots_signature()
+
 def scan(force=False):
  if SCAN_LOCK.acquire(blocking=False):
   try: return _scan_impl(force)
   finally: set_progress(''); SCAN_LOCK.release()
- with LOCK: cached=dict(CACHE) if CACHE.get('items') else None
- if cached:
-  cached.pop('at',None); return _finalize(cached)
+ # 上一次扫描还在跑：等它结束再决定，绝不把内存里的旧结果当成「刚扫描的结果」返回。
+ set_progress('等待上一次扫描结束',0,0)
  SCAN_LOCK.acquire()
  try:
   snap=load_json_file(SNAPSHOT_FILE,None)
-  if isinstance(snap,dict) and isinstance(snap.get('items'),list): return _finalize(snap)
-  return _scan_impl(False)
+  if not force and snapshot_is_current(snap):
+   data={'generatedAt':snap.get('generatedAt'),'items':snap['items'],'roots':snap.get('roots',[]),
+         'errors':snap.get('errors',[]),'rootSig':snap.get('rootSig')}
+   with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
+   return _finalize(dict(data,reused=True))
+  return _scan_impl(force)
  finally: set_progress(''); SCAN_LOCK.release()
 
 def _scan_impl(force=False):
+ gs=groups(); sig=roots_signature(gs)
  if not force:
   snap=load_json_file(SNAPSHOT_FILE,None)
   if isinstance(snap,dict) and isinstance(snap.get('items'),list) and snap.get('generatedAt'):
    try: age=(datetime.now()-datetime.fromisoformat(snap['generatedAt'])).total_seconds()
    except (ValueError,TypeError): age=-1
-   if 0<=age<SCAN_TTL_DAYS*86400:
-    data={'generatedAt':snap['generatedAt'],'items':snap['items'],'roots':snap.get('roots',[]),'errors':snap.get('errors',[])}
+   if 0<=age<SCAN_TTL_DAYS*86400 and snap.get('rootSig')==sig:
+    data={'generatedAt':snap['generatedAt'],'items':snap['items'],'roots':snap.get('roots',[]),'errors':snap.get('errors',[]),'rootSig':sig}
     with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
-    return _finalize(data)
+    return _finalize(dict(data,reused=True))
  set_progress('枚举扫描目录'); rr=[]; out=[]; errors=[]; labels=load_labels(); ai_cache=load_json_file(AI_CACHE_FILE,{}); old_inventory=set(load_json_file(INVENTORY_FILE,[])); baseline=not INVENTORY_FILE.exists(); seen_roots=set()
- for group_rows in groups():
+ for group_rows in gs:
   for raw in group_rows['roots']:
    try: rp=Path(raw)
    except (OSError,ValueError): continue
@@ -992,7 +1019,7 @@ def _scan_impl(force=False):
    manual=labels.get(str(p.resolve()).lower())
    if manual and manual.get('label')=='keep': item.update(_manual_keep_fields(manual))
    fp=item_fingerprint(item); item['fingerprint']=fp; item['aiDescription']=({'summary':media_kind,'model':'本地媒体识别'} if media_kind else ai_cache.get(fp)); item['isNew']=False if baseline else fp not in old_inventory
-   out.append(item)
+   out.append(item); return item
   except OSError as e: errors.append(str(e))
  for ri,(grp,root) in enumerate(rr,1):
   set_progress('统计目录内容',ri,len(rr))
@@ -1017,13 +1044,15 @@ def _scan_impl(force=False):
      if member.is_file() and media_file_kind(member): continue
      member_media=media_directory_kind(member) if member.is_dir() else ''
      add_item(member,root,p.name,decision.get('reason','多个下载包的集合'),member_media,grp)
-   else: add_item(p,root,grp=grp)
+   else:
+    one=add_item(p,root,grp=grp)
+    if one and decision.get('pending'): one['collectionPending']=True
  set_progress('保存扫描结果')
  save_json_file(INVENTORY_FILE,[item_fingerprint(x) for x in out])
- data={'generatedAt':datetime.now().isoformat(timespec='seconds'),'items':out,'roots':[str(p) for _,p in rr],'errors':errors,'version':APP_VERSION}
+ data={'generatedAt':datetime.now().isoformat(timespec='seconds'),'items':out,'roots':[str(p) for _,p in rr],'errors':errors,'rootSig':sig,'version':APP_VERSION}
  save_json_file(SNAPSHOT_FILE,data)
  with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
- return _finalize(data)
+ return _finalize(dict(data,reused=False))
 
 def allowed(p,root_list=None):
  try:
