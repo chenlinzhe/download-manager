@@ -43,20 +43,25 @@ header h1{font-size:16px;font-weight:600;margin:0;letter-spacing:.2px;white-spac
 main{max-width:1560px;margin:0 auto;padding:20px 24px 32px}
 .notice{display:flex;gap:10px;align-items:flex-start;background:var(--info-bg);color:var(--info-fg);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;font-size:13px}
 .notice-icon{flex:none;font-size:14px;line-height:1.45}
-.tag-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 14px;font-size:12px}
+/* 资源标签：所有标签共用一个圆角外框，标签之间只有一条细分隔线，不会出现「框套框 / 框压框」 */
+.tag-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 14px;font-size:12px}
 .tag-bar[hidden]{display:none}
-.tag-wrap{display:inline-flex;align-items:center;border:1px solid var(--border-strong);background:var(--surface);border-radius:999px;overflow:hidden}
-.tag-wrap.on{border-color:var(--accent);background:var(--accent-soft)}
-.tag-wrap.editing{padding:2px 6px;border-color:var(--accent);background:var(--surface)}
-button.tag-main{display:inline-flex;align-items:center;gap:7px;border:0;background:transparent;padding:5px 12px;font-size:12.5px;color:var(--fg);cursor:pointer;line-height:1.45}
+.tag-tabs{display:inline-flex;flex-wrap:wrap;align-items:stretch;border:1px solid var(--border-strong);border-radius:10px;background:var(--surface);overflow:hidden;min-width:0}
+.tag-wrap{display:inline-flex;align-items:center;border:0;background:transparent;box-shadow:inset -1px 0 0 var(--border)}
+.tag-wrap:last-child{box-shadow:none}
+.tag-wrap.on{background:var(--accent-soft);box-shadow:inset -1px 0 0 var(--border),inset 0 -2px 0 var(--accent)}
+.tag-wrap.on:last-child{box-shadow:inset 0 -2px 0 var(--accent)}
+.tag-wrap.editing{background:var(--surface);padding:0 2px}
+button.tag-main{display:inline-flex;align-items:center;gap:7px;border:0;background:transparent;padding:6px 12px;font-size:12.5px;color:var(--fg);cursor:pointer;line-height:1.4}
 button.tag-main:hover{color:var(--accent)}
 .tag-wrap.on button.tag-main{color:var(--accent);font-weight:600}
 button.tag-main .tag-n{color:var(--fg-faint);font-size:11.5px;font-weight:400}
-button.tag-edit{border:0;border-left:1px solid var(--border);background:transparent;color:var(--fg-faint);cursor:pointer;padding:5px 10px;font-size:11.5px;line-height:1.45}
-button.tag-edit:hover{color:var(--accent)}
-button.tag-add{border:1px dashed var(--border-strong);background:transparent;border-radius:999px;padding:5px 12px;font-size:12.5px;color:var(--fg-muted);cursor:pointer;line-height:1.45}
+button.tag-edit{border:0;background:transparent;color:var(--fg-faint);cursor:pointer;padding:6px 8px;font-size:11.5px;line-height:1.4}
+button.tag-edit:hover{color:var(--accent);background:var(--surface-2)}
+.tag-wrap button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+button.tag-add{border:1px dashed var(--border-strong);background:transparent;border-radius:10px;padding:6px 12px;font-size:12.5px;color:var(--fg-muted);cursor:pointer;line-height:1.4}
 button.tag-add:hover{border-color:var(--accent);color:var(--accent)}
-input.tag-input{width:150px;border:0;background:transparent;color:var(--fg);font-size:12.5px;padding:2px 3px;outline:none}
+input.tag-input{width:132px;height:27px;border:0;background:transparent;color:var(--fg);font-size:12.5px;padding:0 6px;outline:none}
 .summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
 .card .k{display:block;font-size:12px;color:var(--fg-faint);margin-bottom:6px;letter-spacing:.2px}
@@ -200,7 +205,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </head>
 <body>
 <header>
- <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V1.8</span></div>
+ <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V1.9</span></div>
  <div class="header-right">
   <span id="status">准备加载…</span>
   <button id="themeBtn" class="icon-btn" title="切换深色 / 浅色主题（也可以在设置 → 外观与主题里选跟随系统）" aria-label="切换主题">&#9790;</button>
@@ -231,8 +236,8 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
     <option>不用保住</option>
    </select>
    <label class="chk" title="只显示本次扫描新出现的项目"><input type="checkbox" id="onlyNew">只看新增</label>
-   <select id="root" title="切换要显示的下载目录，或新增一个要扫描的目录">
-    <option value="__add__">＋ 新增目录…</option>
+   <select id="root" title="切换要显示的目录，或新增目录（新增时可以在资源管理器里按住 Ctrl / Shift 一次选多个文件夹）">
+    <option value="__add__">＋ 新增目录（可多选）…</option>
     <option value="" selected>全部目录</option>
    </select>
    <button id="rescan" title="立刻重新扫描全部目录：重新读取文件、大小与注册信息（大约几十秒）">重新扫描</button>
@@ -279,7 +284,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    <button type="button" class="nav-item" data-pane="ignore" title="查看并撤销被忽略的项目名字">忽略名单</button>
    <button type="button" class="nav-item" data-pane="theme" title="跟随系统 / 浅色 / 深色">外观与主题</button>
    <button type="button" class="nav-item" data-pane="guide" title="逐条说明软件里的每个功能：扫描、建议、AI 分析、批量操作、设置">功能说明</button>
-   <div class="nav-foot">下载包管家 V1.8<br>程序不会运行任何安装包</div>
+   <div class="nav-foot">下载包管家 V1.9<br>程序不会运行任何安装包</div>
   </nav>
   <section class="settings-body">
    <div class="pane" data-pane="model">
@@ -335,7 +340,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
      <h3>一、扫描：它是怎么找到下载包的</h3>
      <ul>
       <li><b>自动找下载目录</b>：逐个磁盘（C 到 Z）看根目录下名字像下载目录的文件夹，例如 Downloads、下载、Down。</li>
-      <li><b>手动加目录</b>：工具栏的目录下拉里选「＋ 新增目录…」，可以把任意文件夹加进来（含移动硬盘、网络路径、NAS 共享目录）；加过之后每次扫描都会带上。</li>
+      <li><b>手动加目录</b>：工具栏的目录下拉里选「＋ 新增目录（可多选）…」，可以把任意文件夹加进来（含移动硬盘、网络路径、NAS 共享目录）；选的时候按住 <b>Ctrl</b> 或 <b>Shift</b> 可以一次选好几个文件夹，一次全加进来。加过之后每次扫描都会带上。</li>
       <li><b>只展开一层</b>：下载目录里的项目直接列出；若某个文件夹被判定为「多个独立下载包的集合目录」，会把它里面的子项单独列成一行，显示为「集合名 / 子项名」。再深一层不展开，避免把安装目录里的 dll 也当成下载包。</li>
       <li><b>一周复用一次结果</b>：同一份扫描结果 7 天内直接复用，所以再次打开软件几乎立刻出列表；想马上看最新的，就点「重新扫描」。</li>
       <li><b>重新扫描</b>：忽略缓存，重新读取每个项目的文件数、大小、修改时间、目录里是否带注册机、压缩包里有哪些文件。</li>
@@ -348,7 +353,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
       <li><b>标签条在哪</b>：提示条下面那一排圆角标签。第一个标签固定叫<b>「下载包」</b>，后面写着它下面有几个项目。</li>
       <li><b>「下载包」里是什么</b>：自动发现的下载目录（各磁盘上名字含 download / 下载 的文件夹），加上你在目录下拉里手工添加的目录。</li>
       <li><b>新建自己的标签</b>：点标签条右边的「＋ 新建标签」，输入名字（最多 12 字），比如「我的项目」，回车就建好，页面会自动切到这个新标签。</li>
-      <li><b>每个标签的目录自己加</b>：切到某个标签后，在工具栏的目录下拉里选「＋ 新增目录…」，选中的目录就加到这个标签下面；第一个标签「下载包」加目录的方式跟以前一样。</li>
+      <li><b>每个标签的目录自己加</b>：切到某个标签后，在工具栏的目录下拉里选「＋ 新增目录（可多选）…」，选中的目录就加到这个标签下面（一次可以选好几个）；第一个标签「下载包」加目录的方式跟以前一样。一个目录只归一个标签，重复选会自动跳过。</li>
       <li><b>功能完全一样</b>：每个标签都能扫描、看顶部四张卡片、按目录筛选、智能搜索、AI 分析、标为保留 / 忽略 / 转移 / 移到回收站、写备注，用法一模一样，区别只是看的是这一组目录。</li>
       <li><b>改名或切走</b>：除「下载包」外，标签右侧的 ✎ 可以改名（Enter 保存、Esc 放弃）；点标签本身就切换视图，四张卡片和表格都只算当前标签里的项目。</li>
       <li><b>标签只换视角</b>：新建 / 改名标签不会动任何文件，也不改变清理建议的算法；想让某个项目彻底不参与清理，就勾上再「标为保留」或右键「忽略」。标签存在本机 resource_groups.json。</li>
@@ -463,6 +468,6 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="ctxMenu" class="ctx-menu"></div>
-<script src="app.js?v=20260820-14"></script>
+<script src="app.js?v=20260820-21"></script>
 </body>
 </html>

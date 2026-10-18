@@ -12,11 +12,21 @@ class Api:
   try: return {'ok':True,'result':server.open_path(path)}
   except Exception as e: return {'ok':False,'error':str(e)}
  def add_manual_root(self, group=None):
+  """选目录时可以按住 Ctrl 或 Shift 一次选多个，全部加到当前标签下。"""
   try:
-   result=webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG)
+   start=''
+   try:
+    for g in server.groups():
+     if g['id']==(group or 'download') and g['roots']:
+      start=str(Path(g['roots'][0]).parent); break
+   except Exception:
+    start=''
+   kw={'allow_multiple':True}
+   if start: kw['directory']=start
+   result=webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG,**kw)
    if not result: return {'ok':False,'cancelled':True}
-   path=result[0] if isinstance(result,(list,tuple)) else result
-   return {'ok':True,'result':server.add_manual_root(path,group)}
+   paths=[str(x) for x in (result if isinstance(result,(list,tuple)) else [result])]
+   return {'ok':True,'result':server.add_manual_roots(paths,group)}
   except Exception as e: return {'ok':False,'error':str(e)}
  def tokenize(self, query):
   try: return {'ok':True,'result':server.split_query_terms(query)}

@@ -10,7 +10,7 @@ if getattr(__import__('sys'),'frozen',False):
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
 GROUPS_FILE=APP/'resource_groups.json'
-APP_VERSION='1.8'
+APP_VERSION='1.9'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -123,24 +123,61 @@ def rename_group(gid,name):
  save_groups(data)
  return {'id':key,'name':text,'roots':target['roots']}
 
+def add_manual_roots(paths,group=None):
+ """一次把多个目录加进同一个资源标签：重复的自动跳过，坏路径单独报错，其余照常加进去。"""
+ gid=' '.join(str(group or '').split()) or 'download'
+ rows=load_groups(); target=None
+ for g in rows:
+  if g['id']==gid: target=g
+ if gid!='download' and target is None: raise ValueError('找不到这个标签：'+gid)
+ gname='下载包'
+ if target is not None: gname=target['name']
+ owner={}
+ for g in groups():
+  for raw in g['roots']:
+   try: owner.setdefault(str(Path(raw)).lower(),g['name'])
+   except (OSError,ValueError): pass
+ mine=[]
+ if gid=='download':
+  for raw in load_json_file(MANUAL_ROOTS_FILE,[]):
+   try: mine.append(str(Path(raw).resolve()))
+   except (OSError,ValueError): pass
+ else:
+  mine=list(target['roots'])
+ added=[]; skipped=[]; failed=[]; seen=set()
+ for raw in paths or []:
+  try: p=Path(str(raw)).resolve()
+  except (OSError,ValueError):
+   failed.append({'path':str(raw),'error':'路径无效'}); continue
+  key=str(p).lower()
+  if not p.is_dir():
+   failed.append({'path':str(p),'error':'不是有效目录'}); continue
+  if key in seen:
+   skipped.append({'path':str(p),'reason':'同一个目录选了两次'}); continue
+  other=owner.get(key)
+  if other:
+   skipped.append({'path':str(p),'reason':('已经在这个标签里了' if other==gname else '已经在「'+other+'」里了')}); continue
+  seen.add(key); added.append(str(p))
+ if added:
+  if gid=='download':
+   out=list(mine); low={x.lower() for x in out}
+   for x in added:
+    if x.lower() not in low: low.add(x.lower()); out.append(x)
+   save_json_file(MANUAL_ROOTS_FILE,out)
+  else:
+   target['roots'].extend(added); save_groups(rows)
+ return {'group':gid,'groupName':gname,'added':added,'skipped':skipped,'failed':failed}
+
 def add_manual_root(path,group=None):
  """把目录加到某个资源标签下；默认加到内置的「下载包」。"""
- p=Path(path).resolve()
- if not p.is_dir(): raise ValueError('所选路径不是有效目录')
- gid=' '.join(str(group or '').split()) or 'download'
- if gid=='download':
-  values=load_json_file(MANUAL_ROOTS_FILE,[])
-  normalized={str(Path(x).resolve()).lower():x for x in values}
-  normalized[str(p).lower()]=str(p)
-  save_json_file(MANUAL_ROOTS_FILE,list(normalized.values()))
-  return str(p)
- data=load_groups(); target=None
- for g in data:
-  if g['id']==gid: target=g
- if target is None: raise ValueError('找不到这个标签：'+gid)
- if str(p).lower() not in {str(Path(x)).lower() for x in target['roots']}:
-  target['roots'].append(str(p)); save_groups(data)
- return str(p)
+ r=add_manual_roots([path],group)
+ if r['failed']:
+  err=r['failed'][0].get('error') or '添加失败'
+  raise ValueError('所选路径不是有效目录' if err=='不是有效目录' else err)
+ if r['added']: return r['added'][0]
+ if r['skipped']: return r['skipped'][0]['path']
+ try: return str(Path(str(path)).resolve())
+ except (OSError,ValueError): return str(path)
 
 def open_path(path):
  p=Path(path)

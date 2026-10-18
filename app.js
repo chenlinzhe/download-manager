@@ -57,16 +57,18 @@ function renderTags(){
  let bar=el('tagBar');if(!bar)return;
  let list=scanGroups.length?scanGroups:[{id:'download',name:'下载包',roots:[],count:0,builtin:true}];
  bar.hidden=false;
- bar.innerHTML=list.map(g=>{
+ bar.innerHTML='<span class="tag-tabs">'+list.map(g=>{
   let on=g.id===activeGroup;
-  let tips=(g.roots&&g.roots.length)?g.roots.join('\n'):'这个标签下还没有目录：在目录下拉里选「＋ 新增目录…」把目录加进来';
+  let tips=(g.roots&&g.roots.length)?g.roots.join('\n'):'这个标签下还没有目录：在目录下拉里选「＋ 新增目录（可多选）…」把目录加进来';
   let edit=g.builtin?'':'<button type="button" class="tag-edit" data-gid="'+esc(g.id)+'" title="给这个标签改名">✎</button>';
   return '<span class="tag-wrap'+(on?' on':'')+'"><button type="button" class="tag-main" data-gid="'+esc(g.id)+'" title="'+esc(tips)+'"><span class="tag-name">'+esc(g.name)+'</span><span class="tag-n">'+(g.count||0)+' 项</span></button>'+edit+'</span>';
- }).join('')+'<button type="button" class="tag-add" title="新建一个标签（例如「我的项目」），功能跟「下载包」完全一样，只是目录由你自己加">＋ 新建标签</button>';
+ }).join('')+'</span><button type="button" class="tag-add" title="新建一个标签（例如「我的项目」），功能跟「下载包」完全一样，只是目录由你自己加">＋ 新建标签</button>';
  bar.querySelectorAll('button.tag-main').forEach(b=>b.onclick=()=>switchGroup(b.dataset.gid));
  bar.querySelectorAll('button.tag-edit').forEach(b=>b.onclick=e=>{e.stopPropagation();renameGroup(b.dataset.gid)});
  let add=bar.querySelector('button.tag-add');if(add)add.onclick=()=>newGroup();
 }
+/* 标签们的外框：所有标签共用一个圆角框，新建与改名的输入框也放进去 */
+function tagTabs(){let bar=el('tagBar');return bar?bar.querySelector('.tag-tabs'):null}
 function renderScanBar(){
  let bar=el('scanBar');if(!bar||!scanInfo)return;
  let g=groupOf(activeGroup),roots=(g&&g.roots)||[],errs=scanInfo.errs||[];
@@ -77,7 +79,7 @@ function renderScanBar(){
 function fillRootSelect(){
  let sel=el('root');if(!sel)return;
  let g=groupOf(activeGroup),roots=(g&&g.roots)||[],prev=sel.value;
- sel.innerHTML='<option value="__add__">＋ 新增目录…</option><option value="">「'+esc(activeGroupName())+'」的全部目录</option>'+roots.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join('');
+ sel.innerHTML='<option value="__add__">＋ 新增目录（可多选）…</option><option value="">「'+esc(activeGroupName())+'」的全部目录</option>'+roots.map(x=>'<option value="'+esc(x)+'">'+esc(x)+'</option>').join('');
  sel.value=(prev&&roots.indexOf(prev)>=0)?prev:'';
 }
 function switchGroup(gid){
@@ -100,8 +102,8 @@ async function newGroup(){
  let bar=el('tagBar');if(!bar||bar.querySelector('.tag-input'))return;
  let ho=document.createElement('span');ho.className='tag-wrap editing';
  ho.innerHTML='<input class="tag-input" type="text" maxlength="12" placeholder="标签名，如：我的项目">';
- let add=bar.querySelector('button.tag-add');
- if(add)bar.insertBefore(ho,add);else bar.appendChild(ho);
+ let box=tagTabs()||bar;
+ box.appendChild(ho);
  let input=ho.querySelector('input');input.focus();
  let closed=false;
  async function finish(save){
@@ -113,7 +115,7 @@ async function newGroup(){
   let res=d.result||{};
   await load(false);
   if(res.id&&groupOf(res.id)){activeGroup=res.id;chosen.clear();naturalPaths=null;fillRootSelect();renderTags();render();refreshCounts();renderScanBar()}
-  infoDone('已新建标签「'+(res.name||text)+'」，现在在目录下拉里选「＋ 新增目录…」把目录加进来',false);
+  infoDone('已新建标签「'+(res.name||text)+'」，现在在目录下拉里选「＋ 新增目录（可多选）…」把目录加进来（按住 Ctrl / Shift 可一次选多个）',false);
  }
  input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();finish(true)}else if(e.key==='Escape'){e.preventDefault();finish(false)}};
  input.onblur=()=>finish(true);
@@ -307,7 +309,20 @@ async function smartSearch(){
  }finally{
   if(version===searchVersion){button.disabled=false;button.classList.remove('searching');button.textContent='智能搜索';render()}
  }
-}async function addRoot(){let d=await native().add_manual_root(activeGroup);if(d.cancelled)return;if(!d.ok)return alert(d.error);infoDone('已把目录加进「'+activeGroupName()+'」：'+d.result,false);await load(true)}
+}async function addRoot(){
+ let d=await native().add_manual_root(activeGroup);
+ if(d.cancelled)return;
+ if(!d.ok)return alert(d.error);
+ let r=d.result||{},added=r.added||[],skipped=r.skipped||[],failed=r.failed||[];
+ if(!added.length&&!skipped.length&&!failed.length)return;
+ let msg='';
+ if(added.length===1)msg='已把目录加进「'+activeGroupName()+'」：'+added[0];
+ else if(added.length>1)msg='已把 '+added.length+' 个目录加进「'+activeGroupName()+'」：'+added.join('、');
+ if(skipped.length)msg+=(msg?'；':'')+'跳过 '+skipped.length+' 个（'+skipped.slice(0,2).map(x=>x.reason||'').join('、')+'）';
+ if(failed.length)msg+=(msg?'；':'')+failed.length+' 个没加成（'+failed.slice(0,2).map(x=>x.reason||x.error||'').join('、')+'）';
+ infoDone(msg,failed.length>0);
+ await load(true)
+}
 let settingsPane='model';
 async function openSettings(pane){
  el('settingsModal').classList.add('open');

@@ -716,8 +716,14 @@ class TestResourceGroups(TempApp):
         self.assertEqual(row['roots'], [str(self.proj.resolve())])
         self.assertTrue(server.allowed(self.proj / 'inner.zip'),
                         u'用户自己标签下的目录也要能参与保留 / 转移 / 回收站')
-        server.add_manual_root(str(self.proj))
-        self.assertIn(str(self.proj.resolve()), server.load_json_file(server.MANUAL_ROOTS_FILE, []),
+        self.assertEqual(server.add_manual_root(str(self.proj)), str(self.proj.resolve()),
+                         u'同一个目录不会同时进两个标签，重复添加时原样返回')
+        self.assertEqual(server.load_json_file(server.MANUAL_ROOTS_FILE, []), [],
+                         u'已经在「我的项目」里了，不该再塞进内置的「下载包」')
+        extra = self.dir / 'extra'
+        extra.mkdir()
+        server.add_manual_root(str(extra))
+        self.assertIn(str(extra.resolve()), server.load_json_file(server.MANUAL_ROOTS_FILE, []),
                       u'不指定标签时目录仍然加到内置的「下载包」')
 
     def test_unknown_group_is_rejected(self):
@@ -735,6 +741,70 @@ class TestResourceGroups(TempApp):
         self.assertEqual(byid[g['id']]['count'], 1)
         self.assertEqual(data['items'][0]['groupName'], u'下载包')
         self.assertEqual(data['items'][1]['groupName'], u'我的项目')
+
+class TestAddManualRoots(TempApp):
+    """一次加多个目录（资源管理器里按住 Ctrl / Shift 多选）。"""
+
+    def setUp(self):
+        super().setUp()
+        self.dl = self.dir / 'downloads'
+        self.dl.mkdir()
+        server.roots = lambda: [self.dl]
+        self.a = self.dir / 'proj-a'
+        self.b = self.dir / 'proj-b'
+        self.c = self.dir / 'proj-c'
+        for p in (self.a, self.b, self.c):
+            p.mkdir()
+
+    def test_many_at_once(self):
+        g = server.add_group(u'我的项目')
+        out = server.add_manual_roots([str(self.a), str(self.b), str(self.c)], g['id'])
+        self.assertEqual(out['added'], [str(self.a.resolve()), str(self.b.resolve()), str(self.c.resolve())])
+        self.assertEqual(out['skipped'], [])
+        self.assertEqual(out['failed'], [])
+        self.assertEqual(out['groupName'], u'我的项目')
+        row = [x for x in server.groups() if x['id'] == g['id']][0]
+        self.assertEqual(sorted(row['roots']), sorted(out['added']))
+
+    def test_duplicates_are_skipped(self):
+        g = server.add_group(u'我的项目')
+        server.add_manual_roots([str(self.a)], g['id'])
+        out = server.add_manual_roots([str(self.a), str(self.b), str(self.b)], g['id'])
+        self.assertEqual(out['added'], [str(self.b.resolve())])
+        self.assertEqual(len(out['skipped']), 2)
+        self.assertIn(u'已经在这个标签里了', out['skipped'][0]['reason'])
+        self.assertIn(u'两次', out['skipped'][1]['reason'])
+
+    def test_folder_of_another_label_is_skipped(self):
+        g = server.add_group(u'我的项目')
+        server.add_manual_roots([str(self.a)], g['id'])
+        out = server.add_manual_roots([str(self.a)], 'download')
+        self.assertEqual(out['added'], [])
+        self.assertIn(u'我的项目', out['skipped'][0]['reason'])
+        self.assertEqual(server.load_json_file(server.MANUAL_ROOTS_FILE, []), [])
+
+    def test_missing_folder_reports_failure_but_keeps_others(self):
+        g = server.add_group(u'我的项目')
+        out = server.add_manual_roots([str(self.dir / 'nope'), str(self.a)], g['id'])
+        self.assertEqual(out['added'], [str(self.a.resolve())])
+        self.assertEqual(len(out['failed']), 1)
+        self.assertIn(u'不是有效目录', out['failed'][0]['error'])
+
+    def test_unknown_group_is_rejected(self):
+        with self.assertRaises(ValueError):
+            server.add_manual_roots([str(self.a)], 'nope')
+
+    def test_builtin_group_takes_many(self):
+        out = server.add_manual_roots([str(self.a), str(self.b)])
+        self.assertEqual(len(out['added']), 2)
+        saved = server.load_json_file(server.MANUAL_ROOTS_FILE, [])
+        self.assertEqual(sorted(saved), sorted([str(self.a.resolve()), str(self.b.resolve())]))
+
+    def test_empty_list_changes_nothing(self):
+        g = server.add_group(u'我的项目')
+        out = server.add_manual_roots([], g['id'])
+        self.assertEqual((out['added'], out['skipped'], out['failed']), ([], [], []))
+        self.assertEqual([x for x in server.groups() if x['id'] == g['id']][0]['roots'], [])
 
 
 if __name__ == '__main__':
