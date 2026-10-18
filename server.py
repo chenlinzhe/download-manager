@@ -10,7 +10,7 @@ if getattr(__import__('sys'),'frozen',False):
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
 GROUPS_FILE=APP/'resource_groups.json'
-APP_VERSION='2.0'
+APP_VERSION='2.1'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -85,6 +85,20 @@ def groups():
    except (OSError,ValueError): continue
    if p.is_dir(): rs.append(str(p))
   out.append({'id':g['id'],'name':g['name'],'roots':rs,'builtin':False})
+ return out
+
+def group_list():
+ """标签清单 + 上次扫描结果里的条目数。给界面启动时先画标签条用，不触发扫描。"""
+ counts={}
+ snap=load_json_file(SNAPSHOT_FILE,None)
+ rows=snap.get('items') if isinstance(snap,dict) and isinstance(snap.get('items'),list) else []
+ for item in rows:
+  if isinstance(item,dict):
+   gid=str(item.get('group') or 'download'); counts[gid]=counts.get(gid,0)+1
+ out=[]
+ for g in groups():
+  out.append({'id':g['id'],'name':g['name'],'roots':g['roots'],
+              'count':counts.get(g['id'],0),'builtin':g.get('builtin',False)})
  return out
 
 def all_roots():
@@ -373,17 +387,38 @@ def media_directory_kind(p):
  # Require the leading kind to dominate all files; otherwise use generic media.
  return kind if counts[kind]/total>=0.50 else ''
 
+# 统计大小 / 文件数时跳过的目录（依赖、缓存、版本库）。这些不是下载内容本身，
+# 但动辄几十万个文件，走进去会让扫描慢上几分钟，所以只算一个目录、不进去数。
+WALK_SKIP=frozenset('''node_modules __pycache__ .git .svn .hg .venv venv .tox .mypy_cache
+.pytest_cache site-packages .next .nuxt .cache .gradle .m2 .pnpm-store .yarn .parcel-cache
+.turbo .svelte-kit .angular bower_components jspm_packages .eggs .bundle .cargo .npm .nuget'''.split())
+HINT_RE=re.compile(r'crack|keygen|注册机|破解|无限试用|激活工具|serial',re.I)
+
 def summary(p):
- size=files=dirs=err=0; newest=0; hints=[]
- if p.is_file():
-  s=p.stat(); return s.st_size,1,0,s.st_mtime,[],0
- for base,ds,fs in os.walk(p,onerror=lambda e:None):
-  dirs+=len(ds)
-  for n in fs:
-   if re.search(r'crack|keygen|注册机|破解|无限试用|激活工具|serial',n,re.I): hints.append(n)
-   try:
-    s=(Path(base)/n).stat(); size+=s.st_size; files+=1; newest=max(newest,s.st_mtime)
-   except OSError: err+=1
+ """统计一个条目的大小、文件数、目录数与最新时间。用 os.scandir（比 os.walk+Path.stat 快
+ 一个数量级），并跳过依赖/缓存目录；跳过目录仍计入目录数，只是不进去逐个文件数。"""
+ size=files=dirs=err=0; newest=0.0; hints=[]
+ try: st=os.stat(p)
+ except OSError: raise
+ if not os.path.isdir(p):
+  return st.st_size,1,0,st.st_mtime,[],0
+ stack=[p]
+ while stack:
+  base=stack.pop()
+  try: it=os.scandir(base)
+  except OSError: err+=1; continue
+  with it:
+   for e in it:
+    try:
+     if e.is_dir(follow_symlinks=False):
+      dirs+=1
+      if e.name.lower() in WALK_SKIP: continue
+      stack.append(e.path); continue
+     s=e.stat(follow_symlinks=False)
+    except OSError: err+=1; continue
+    size+=s.st_size; files+=1
+    if s.st_mtime>newest: newest=s.st_mtime
+    if len(hints)<6 and HINT_RE.search(e.name): hints.append(e.name)
  return size,files,dirs,newest,hints[:6],err
 
 def analyze(p,size,files,newest,hints):
@@ -1022,7 +1057,7 @@ def _scan_impl(force=False):
    out.append(item); return item
   except OSError as e: errors.append(str(e))
  for ri,(grp,root) in enumerate(rr,1):
-  set_progress('统计目录内容',ri,len(rr))
+  set_progress('统计目录内容 · '+os.path.basename(str(root))[:20],ri,len(rr))
   try: children=list(root.iterdir())
   except OSError as e: errors.append(str(e)); continue
   ign_names,ign_paths=ignore_sets()
@@ -1106,10 +1141,13 @@ class H(SimpleHTTPRequestHandler):
   b=json.dumps(o,ensure_ascii=False).encode(); self.send_response(status); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Content-Length',str(len(b))); self.end_headers(); self.wfile.write(b)
  def do_GET(self):
   u=urllib.parse.urlparse(self.path)
+  if u.path=='/api/groups':
+   try: return self.sendj({'ok':True,'result':group_list()})
+   except Exception as e: return self.sendj({'ok':False,'error':str(e)},500)
   if u.path=='/api/scan':
    force=urllib.parse.parse_qs(u.query).get('force',['0'])[0]=='1'
    try:
-    with LOCK: fresh=CACHE and time.time()-CACHE.get('at',0)<300
+    with LOCK: fresh=CACHE and time.time()-CACHE.get('at',0)<300 and CACHE.get('rootSig')==roots_signature()
     if fresh and not force:
      with LOCK: return self.sendj({k:v for k,v in CACHE.items() if k!='at'})
     return self.sendj(scan(force))

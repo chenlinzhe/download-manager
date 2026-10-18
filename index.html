@@ -205,7 +205,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </head>
 <body>
 <header>
- <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V2.0</span></div>
+ <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V2.1</span></div>
  <div class="header-right">
   <span id="status">准备加载…</span>
   <button id="themeBtn" class="icon-btn" title="切换深色 / 浅色主题（也可以在设置 → 外观与主题里选跟随系统）" aria-label="切换主题">&#9790;</button>
@@ -266,7 +266,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
     <th class="sortable" data-sort="ai" title="AI 说明：勾选这一行后点工具栏的「AI 分析」，DeepSeek 会用一句话讲清这是什么包。没分析过显示「--」；这一格同时显示你写的备注，点格子就能写 / 改备注。不点「AI 分析」就不会联网。">AI 说明：这是个什么包</th>
     <th class="sortable" data-sort="rec">建议</th>
     <th class="sortable" data-sort="score">价值分</th>
-    <th class="sortable" data-sort="size">大小</th>
+    <th class="sortable" data-sort="size" title="大小与文件数不含 node_modules、.git、venv 这类依赖与缓存目录（只按一个目录算，不逐个文件数），所以大项目也会很快扫完">大小</th>
     <th class="sortable" data-sort="modified">时间</th>
     <th>可重下性</th>
     <th>注册 / 授权情况</th>
@@ -284,7 +284,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    <button type="button" class="nav-item" data-pane="ignore" title="查看并撤销被忽略的项目名字">忽略名单</button>
    <button type="button" class="nav-item" data-pane="theme" title="跟随系统 / 浅色 / 深色">外观与主题</button>
    <button type="button" class="nav-item" data-pane="guide" title="逐条说明软件里的每个功能：扫描、建议、AI 分析、批量操作、设置">功能说明</button>
-   <div class="nav-foot">下载包管家 V2.0<br>程序不会运行任何安装包</div>
+   <div class="nav-foot">下载包管家 V2.1<br>程序不会运行任何安装包</div>
   </nav>
   <section class="settings-body">
    <div class="pane" data-pane="model">
@@ -343,7 +343,8 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
       <li><b>自动找下载目录</b>：逐个磁盘（C 到 Z）看根目录下名字像下载目录的文件夹，例如 Downloads、下载、Down。</li>
       <li><b>手动加目录</b>：工具栏的目录下拉里选「＋ 新增目录（可多选）…」，可以把任意文件夹加进来（含移动硬盘、网络路径、NAS 共享目录）；选的时候按住 <b>Ctrl</b> 或 <b>Shift</b> 可以一次选好几个文件夹，一次全加进来。加过之后每次扫描都会带上。</li>
       <li><b>只展开一层</b>：下载目录里的项目直接列出；若某个文件夹被判定为「多个独立下载包的集合目录」，会把它里面的子项单独列成一行，显示为「集合名 / 子项名」。再深一层不展开，避免把安装目录里的 dll 也当成下载包。判断默认只用本地规则（同一层里有多个安装包、或明显是安装目录），拿不准的目录先当成一个整体；想让 AI 帮忙判断，勾设置里的「扫描时用 AI 判断目录是否该展开」。</li>
-      <li><b>一周复用一次结果</b>：同一份扫描结果 7 天内直接复用，所以再次打开软件几乎立刻出列表。但一旦目录清单有变化（新增或删掉目录、新建或改名标签），下次加载会自动重扫，不会把旧列表当成新结果。想马上看最新的，随时点「重新扫描」。</li>
+      <li><b>扫描为什么这么快</b>：本地只读文件名 / 大小 / 时间，而且统计大小和文件数时会跳过 node_modules、.git、venv、__pycache__ 这类依赖与缓存目录（只按一个目录算，不进去逐个文件数）——它们动辄几十万个文件，是扫描慢的主要原因。</li>
+  <li><b>一周复用一次结果</b>：同一份扫描结果 7 天内直接复用，所以再次打开软件几乎立刻出列表。但一旦目录清单有变化（新增或删掉目录、新建或改名标签），下次加载会自动重扫，不会把旧列表当成新结果。想马上看最新的，随时点「重新扫描」。</li>
       <li><b>重新扫描</b>：忽略缓存，重新读取每个项目的文件数、大小、修改时间、目录里是否带注册机、压缩包里有哪些文件。全程纯本地、不联网；如果上一次扫描还没跑完，再点会等它跑完再扫一遍，不会拿旧结果糊弄你。</li>
       <li><b>散落的图片 / 视频 / 音乐</b>：单个媒体文件不算下载包，不列出来；主要由媒体组成的文件夹标成「媒体目录」，直接给「建议保留」。</li>
       <li><b>忽略名单</b>：名单里的名字（或路径）在扫描阶段就被跳过，不删除任何文件。</li>
@@ -469,6 +470,6 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="ctxMenu" class="ctx-menu"></div>
-<script src="app.js?v=20260820-22"></script>
+<script src="app.js?v=20260820-31"></script>
 </body>
 </html>

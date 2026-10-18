@@ -941,3 +941,66 @@ class TestScanAiSwitch(TempApp):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestScanSpeed(TempApp):
+    """V2.1：统计大小/文件数时跳过依赖与缓存目录，否则大项目要扫十几分钟。"""
+
+    def test_summary_skips_dependency_dirs(self):
+        root = self.dir / 'proj'
+        (root / 'src').mkdir(parents=True)
+        (root / 'src' / 'a.py').write_bytes(b'x' * 10)
+        pkg = root / 'node_modules' / 'pkg'
+        pkg.mkdir(parents=True)
+        for i in range(50):
+            (pkg / ('f%d.js' % i)).write_bytes(b'x' * 100)
+        size, files, dirs, newest, hints, err = server.summary(root)
+        self.assertEqual(files, 1, u'node_modules 里的文件不该一个个数进来')
+        self.assertEqual(size, 10)
+        self.assertEqual(dirs, 2, u'src 与 node_modules 都算一个目录，但不进去数 pkg')
+        self.assertEqual(err, 0)
+
+    def test_summary_uses_scandir_and_keeps_normal_dirs(self):
+        root = self.dir / 'proj2'
+        (root / 'a' / 'b').mkdir(parents=True)
+        (root / 'a' / 'b' / 'crack_tool.exe').write_bytes(b'y' * 5)
+        size, files, dirs, newest, hints, err = server.summary(root)
+        self.assertEqual((files, dirs, size), (1, 2, 5))
+        self.assertIn('crack_tool.exe', hints, u'破解提示照旧要认出来')
+
+
+class TestGroupList(TempApp):
+    """V2.1：界面启动时先用 group_list 把标签条画出来，不能为此触发一次扫描。"""
+
+    def setUp(self):
+        super().setUp()
+        self._cache = server.CACHE
+        server.CACHE = {}
+        self.root_a = self.dir / 'rootA'
+        (self.root_a / 'alpha').mkdir(parents=True)
+        (self.root_a / 'alpha' / 'a.zip').write_bytes(b'x')
+        self._classify = server.classify_first_level
+        server.classify_first_level = lambda children: {}
+        self.group = server.add_group(u'我的项目')
+
+    def tearDown(self):
+        server.classify_first_level = self._classify
+        server.CACHE = self._cache
+        super().tearDown()
+
+    def test_group_list_reads_snapshot_without_scanning(self):
+        server.add_manual_roots([str(self.root_a)], self.group['id'])
+        server.scan(True)
+        called = []
+        orig = server._scan_impl
+        server._scan_impl = lambda *a, **k: called.append(1)
+        try:
+            rows = server.group_list()
+        finally:
+            server._scan_impl = orig
+        self.assertEqual(called, [], u'画标签条不许触发扫描')
+        by_id = {r['id']: r for r in rows}
+        self.assertIn('download', by_id, u'第一个标签永远是「下载包」')
+        self.assertEqual(by_id[self.group['id']]['count'], 1, u'条目数来自上次扫描结果')
+        self.assertEqual(by_id[self.group['id']]['name'], u'我的项目')
+        self.assertEqual(by_id[self.group['id']]['roots'], [str(self.root_a)])

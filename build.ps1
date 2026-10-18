@@ -7,10 +7,10 @@ Set-Location $root
 Write-Host '==> 安装运行依赖 ...'
 python -m pip install -r requirements.txt pyinstaller
 
-Write-Host '==> 开始打包（下载包管家智能搜索版-v20.spec）...'
-python -m PyInstaller --noconfirm --clean "下载包管家智能搜索版-v20.spec"
+Write-Host '==> 开始打包（下载包管家智能搜索版-v21.spec）...'
+python -m PyInstaller --noconfirm --clean "下载包管家智能搜索版-v21.spec"
 
-$exe = Join-Path $root 'dist\下载包管家智能搜索版-v20.exe'
+$exe = Join-Path $root 'dist\下载包管家智能搜索版-v21.exe'
 if (Test-Path $exe) {
     Write-Host ''
     Write-Host "打包成功: $exe"

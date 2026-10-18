@@ -60,6 +60,9 @@ class Api:
  def app_version(self):
   try: return {'ok':True,'result':server.APP_VERSION}
   except Exception as e: return {'ok':False,'error':str(e)}
+ def group_list(self):
+  try: return {'ok':True,'result':server.group_list()}
+  except Exception as e: return {'ok':False,'error':str(e)}
  def scan_status(self):
   try: return server.scan_status()
   except Exception as e: return {'ok':False,'error':str(e)}
