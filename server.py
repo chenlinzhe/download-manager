@@ -12,7 +12,7 @@ SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INV
 GROUPS_FILE=APP/'resource_groups.json'
 AI_HIDDEN_FILE=APP/'ai_hidden.json'
 MODELS_FILE=APP/'models.json'
-APP_VERSION='3.2'
+APP_VERSION='3.3'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
