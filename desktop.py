@@ -1,5 +1,8 @@
 import sys, traceback
 from pathlib import Path
+if '--cli' in sys.argv[1:]:  # V2.2：命令行入口，给 GPT / dsh 这类外部工具读数据用
+ import cli
+ sys.exit(cli.main(sys.argv[sys.argv.index('--cli')+1:]))
 import webview
 import server
 

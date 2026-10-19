@@ -10,7 +10,7 @@ if getattr(__import__('sys'),'frozen',False):
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
 GROUPS_FILE=APP/'resource_groups.json'
-APP_VERSION='2.1'
+APP_VERSION='2.2'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -522,7 +522,7 @@ def set_user_env_key(value):
 def clear_user_env_key(): return set_user_env_key('')
 
 def get_settings(reveal=False):
- cfg={'baseUrl':'https://api.deepseek.com','model':DEFAULT_MODEL,'autoAnalyze':False,'scanAI':False,'destination':''}
+ cfg={'baseUrl':'https://api.deepseek.com','model':DEFAULT_MODEL,'autoAnalyze':False,'scanAI':False,'hideNotice':False,'destination':''}
  cfg.update(load_json_file(SETTINGS_FILE,{}))
  cfg.pop('autoSearch',None)  # 旧版的「自动 AI 分析」开关已废弃，现由 autoAnalyze 控制（默认关闭，不再每次启动都跑分析）
  cfg['model']=MODEL_ALIASES.get(str(cfg.get('model') or '').strip().strip(),str(cfg.get('model') or '').strip() or DEFAULT_MODEL)
@@ -558,6 +558,7 @@ def save_settings(data):
  old['autoAnalyze']=bool(data.get('autoAnalyze',old.get('autoAnalyze',False)))
  old['scanAI']=bool(data.get('scanAI',old.get('scanAI',False)))
  old['destination']=str(data.get('destination') or old.get('destination') or '').strip()
+ old['hideNotice']=bool(data.get('hideNotice',old.get('hideNotice',False)))  # 顶部提示条：用户点过 ✕ 就不再自动显示
  for name in _DERIVED: old.pop(name,None)
  if stored=='file':
   token=protect_key(key) if key else prev_enc

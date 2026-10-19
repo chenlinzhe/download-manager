@@ -1004,3 +1004,128 @@ class TestGroupList(TempApp):
         self.assertEqual(by_id[self.group['id']]['count'], 1, u'条目数来自上次扫描结果')
         self.assertEqual(by_id[self.group['id']]['name'], u'我的项目')
         self.assertEqual(by_id[self.group['id']]['roots'], [str(self.root_a)])
+
+
+class TestNoticeSetting(TempApp):
+    """V2.2：顶部提示条点过 ✕ 之后就不再自动显示（记住「下次是否再显示」）。"""
+
+    def setUp(self):
+        super().setUp()
+        self.env = FakeEnv()
+        self._set_env = server.set_user_env_key
+        self._env_key = server.env_api_key
+        server.set_user_env_key = self.env
+        server.env_api_key = lambda: self.env.stored.get(server.ENV_KEY_NAME, '')
+
+    def tearDown(self):
+        server.set_user_env_key = self._set_env
+        server.env_api_key = self._env_key
+        super().tearDown()
+
+    def test_notice_is_shown_by_default(self):
+        self.assertFalse(server.get_settings(False)['hideNotice'], u'默认要显示提示条')
+
+    def test_closing_notice_is_remembered(self):
+        server.save_settings({'hideNotice': True})
+        self.assertTrue(server.get_settings(False)['hideNotice'])
+        raw = json.loads(server.SETTINGS_FILE.read_text(encoding='utf-8'))
+        self.assertTrue(raw['hideNotice'], u'「不再显示」要写进本机设置')
+
+    def test_partial_save_keeps_notice_choice(self):
+        server.save_settings({'hideNotice': True})
+        server.save_settings({'apiKey': 'sk-' + 'd' * 32})  # 只改 Key，不碰提示条
+        self.assertTrue(server.get_settings(False)['hideNotice'], u'保存别的设置不应把提示条重新打开')
+
+    def test_can_turn_notice_back_on(self):
+        server.save_settings({'hideNotice': True})
+        server.save_settings({'hideNotice': False})
+        self.assertFalse(server.get_settings(False)['hideNotice'])
+
+
+class TestCli(TempApp):
+    """V2.2：命令行入口给 GPT / dsh 等外部工具读数据，默认只读快照、不扫描、不联网。"""
+
+    def setUp(self):
+        super().setUp()
+        import cli
+        self.cli = cli
+        self._cache = server.CACHE
+        server.CACHE = {}
+        self._classify = server.classify_first_level
+        server.classify_first_level = lambda children: {}
+        self.env = FakeEnv()
+        self._set_env = server.set_user_env_key
+        self._env_key = server.env_api_key
+        server.set_user_env_key = self.env
+        server.env_api_key = lambda: ''
+        self.root = self.dir / 'rootA'
+        (self.root / 'alpha').mkdir(parents=True)
+        (self.root / 'alpha' / 'setup.zip').write_bytes(b'x' * 20)
+        (self.root / 'beta').mkdir(parents=True)
+        (self.root / 'beta' / 'tool.exe').write_bytes(b'y' * 40)
+        self.group = server.add_group(u'我的项目')
+        server.add_manual_roots([str(self.root)], self.group['id'])
+        server.scan(True)
+
+    def tearDown(self):
+        server.classify_first_level = self._classify
+        server.set_user_env_key = self._set_env
+        server.env_api_key = self._env_key
+        server.CACHE = self._cache
+        super().tearDown()
+
+    def argv(self, *args):
+        return self.cli.build_parser().parse_args(list(args))
+
+    def test_status_reports_snapshot_and_key_state(self):
+        out = self.cli.cmd_status(self.argv('status'))
+        self.assertTrue(out['ok'])
+        self.assertEqual(out['version'], server.APP_VERSION)
+        self.assertTrue(out['snapshot']['exists'])
+        self.assertEqual(out['snapshot']['count'], 2)
+        self.assertFalse(out['settings']['aiConfigured'], u'没配置 Key 时 aiConfigured 必须是 false')
+
+    def test_groups_and_list(self):
+        groups = self.cli.cmd_groups(self.argv('groups'))
+        self.assertTrue(groups['ok'])
+        by_id = {g['id']: g for g in groups['groups']}
+        self.assertIn('download', by_id, u'第一个标签永远是「下载包」')
+        self.assertEqual(by_id[self.group['id']]['count'], 2)
+        listed = self.cli.cmd_list(self.argv('list', '--sort', 'size', '--limit', '1'))
+        self.assertTrue(listed['ok'])
+        self.assertEqual(listed['total'], 2)
+        self.assertEqual(listed['count'], 1)
+        self.assertEqual(listed['items'][0]['name'], 'beta', u'按大小倒序，beta 更大')
+
+    def test_list_fields_projection(self):
+        listed = self.cli.cmd_list(self.argv('list', '--fields', 'name,sizeHuman'))
+        self.assertEqual(sorted(listed['items'][0].keys()), ['name', 'sizeHuman'])
+
+    def test_search_is_local_and_needs_no_key(self):
+        found = self.cli.cmd_search(self.argv('search', 'alpha'))
+        self.assertTrue(found['ok'])
+        self.assertGreaterEqual(found['count'], 1)
+        self.assertEqual(found['items'][0]['name'], 'alpha')
+
+    def test_describe_by_path_tail(self):
+        out = self.cli.cmd_describe(self.argv('describe', 'beta'))
+        self.assertTrue(out['ok'])
+        self.assertEqual(out['item']['name'], 'beta')
+
+    def test_out_writes_plain_utf8_json(self):
+        target = self.dir / 'out' / 'list.json'
+        code = self.cli.main(['list', '--out', str(target), '--pretty'])
+        self.assertEqual(code, 0)
+        raw = target.read_bytes()
+        self.assertFalse(raw.startswith(b'\xef\xbb\xbf'), u'不要写 BOM')
+        data = json.loads(raw.decode('utf-8'))
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['total'], 2)
+
+    def test_missing_item_exits_nonzero(self):
+        target = self.dir / 'nope.json'
+        code = self.cli.main(['describe', u'不存在的条目', '--out', str(target)])
+        self.assertEqual(code, 1)
+        data = json.loads(target.read_text(encoding='utf-8'))
+        self.assertFalse(data['ok'])
+        self.assertIn('error', data)

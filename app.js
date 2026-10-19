@@ -88,7 +88,7 @@ function switchGroup(gid){
  if(el('q'))el('q').value='';
  fillRootSelect();renderTags();render();refreshCounts();renderScanBar();
  let g=groupOf(gid);
- infoDone('已切到「'+(g?g.name:'下载包')+'」：'+(g?(g.count||0):0)+' 项，功能跟别的标签完全一样，只是看的是这一组目录',false);
+ if(enrichRunning>0)infoBusy(enrichLabel||infoBusyLabel||'AI 分析进行中…',true);else infoDone('已切到「'+(g?g.name:'下载包')+'」：'+(g?(g.count||0):0)+' 项，功能跟别的标签完全一样，只是看的是这一组目录',false);
 }
 async function groupCall(local,url,args,body){
  let api=native(),d;
@@ -184,6 +184,7 @@ async function load(force){
   infoDone((force?'重新扫描完成：「':'扫描完成：「')+activeGroupName()+'」'+groupItems().length+' 项'+(d.reused?'（复用最近扫描结果）':''),false);
   if(api){
    let cfg=await api.get_settings();
+   applySettingsState(cfg&&cfg.ok?cfg.result:null);
    if(cfg&&cfg.ok&&cfg.result&&cfg.result.destination)lastDestination=cfg.result.destination;
    let missing=items.filter(x=>!x.aiDescription&&(force?x.isNew:true)).map(x=>x.path);
    if(cfg&&cfg.ok&&cfg.result.autoAnalyze&&cfg.result.apiKeyMasked&&missing.length)enrich(missing,true)
@@ -201,7 +202,7 @@ async function postAction(url,payload){
 
 /* ---------- V1.8：工具栏左侧的信息条 ---------- */
 /* 凡是「现在要告诉用户的事」都显示在这里：AI 分析进度、扫描与整理结果等；按钮固定在右侧。 */
-let infoHideTimer = null, infoTickTimer = null, infoStart = 0, infoBusyLabel = '';
+let infoHideTimer = null, infoTickTimer = null, infoStart = 0, infoBusyLabel = '', busyActive = false, enrichRunning = 0, enrichLabel = '';
 function infoShow(text, kind) {
 	let s = el('infoBar');
 	if (!s) return;
@@ -210,8 +211,9 @@ function infoShow(text, kind) {
 	s.className = 'info-bar show' + (kind && kind !== 'plain' ? ' ' + kind : '');
 	s.textContent = String(text == null ? '' : text)
 }
-function infoBusy(text) {
-	infoStart = Date.now(); infoBusyLabel = String(text || '');
+function infoBusy(text, resume) {
+	if (!resume) infoStart = Date.now();
+	busyActive = true; infoBusyLabel = String(text || '');
 	infoShow(infoBusyLabel, 'busy');
 	if (infoTickTimer) clearInterval(infoTickTimer);
 	infoTickTimer = setInterval(() => {
@@ -235,8 +237,44 @@ function infoHideLater(ms) {
 	}, ms == null ? 6000 : ms)
 }
 function infoDone(text, isErr) {
-	infoShow(text, isErr ? 'err' : 'done');
+	busyActive = false; infoShow(text, isErr ? 'err' : 'done');
 	infoHideLater(isErr ? 9000 : 6000)
+}
+/* ---------- V2.2：标题栏「自动问答」+ 顶部提示条开关 ---------- */
+let llmReady = false, hideNotice = false;
+function syncNotice() { let n = el('notice'); if (n) n.hidden = !!hideNotice }
+function syncQa() {
+	let q = el('qa'); if (!q) return;
+	if (llmReady) {
+		q.classList.remove('qa-locked');
+		q.title = '自动问答：在这里直接问一句，按 Enter 提交（走「智能搜索」的关键词 + AI 语义，会请求 DeepSeek）';
+		q.placeholder = '自动问答：问一句，Enter 提交'
+	} else {
+		q.classList.add('qa-locked');
+		q.title = '要使用自动问答，请先到「设置」中配置 LLM KEY';
+		q.placeholder = '自动问答（还没配置 LLM KEY）'
+	}
+}
+function applySettingsState(c) {
+	if (!c) return;
+	llmReady = !!c.apiKeyMasked;
+	hideNotice = !!c.hideNotice;
+	if (el('showNotice')) el('showNotice').checked = !hideNotice;
+	syncQa(); syncNotice()
+}
+function qaSubmit() {
+	let q = el('qa'); if (!q) return;
+	let text = q.value.trim();
+	if (!llmReady) {
+		toast('要使用自动问答，请先到「设置」中配置 LLM KEY', true);
+		infoDone('要使用自动问答，请先到「设置」中配置 LLM KEY（设置 → 模型设置里填好 Key 并保存）', true);
+		return
+	}
+	if (!text) { toast('先输入一句想找什么，例如「哪些安装包很久没动了」'); q.focus(); return }
+	el('q').value = text; el('searchStatus').textContent = '';
+	searchVersion++; naturalPaths = null;
+	q.value = '';
+	smartSearch()
 }
 function pad2(n) { return (n < 10 ? '0' : '') + n }
 function stampOf(iso) {
@@ -266,11 +304,11 @@ async function enrich(paths, quiet = false, force = false, skipped = 0) {
 	if (!native() || !paths.length) return;
 	let errors = [], b = el('aiAnalyze');
 	if (b) b.disabled = true;
-	infoBusy('正在分析 ' + paths.length + ' 项…');
+	enrichRunning++; infoBusy('正在分析 ' + paths.length + ' 项…');
 	for (let i = 0; i < paths.length; i += 10) {
 		let group = paths.slice(i, i + 10);
 		let span = (i + 1) + '–' + Math.min(i + group.length, paths.length);
-		infoBusyText('正在分析第 ' + span + ' 项（共 ' + paths.length + ' 项）');
+		enrichLabel = '正在分析第 ' + span + ' 项（共 ' + paths.length + ' 项）'; infoBusyText(enrichLabel);
 		el('status').textContent = 'DeepSeek 并发分析 ' + span + ' / ' + paths.length;
 		let d;
 		try { d = await native().enrich(group, !!force) } catch (e) { d = { ok: false, error: e.message } }
@@ -278,6 +316,7 @@ async function enrich(paths, quiet = false, force = false, skipped = 0) {
 		render();
 		if (!d || !d.ok) errors.push(...Object.values((d && d.errors) || { error: (d && d.error) || '未知错误' }))
 	}
+	enrichRunning--;
 	let ok = !errors.length;
 	let tail = skipped ? ('（另 ' + skipped + ' 项已分析过，跳过）') : '';
 	el('status').textContent = ok ? ('DeepSeek 分析完成并已缓存' + (skipped ? ' · 跳过 ' + skipped + ' 项已分析过的' : '')) : ('分析完成，失败 ' + errors.length + ' 项（可选择后重试）');
@@ -335,6 +374,8 @@ async function openSettings(pane){
  if(!d||!d.ok)return toast('读取设置失败：'+((d&&d.error)||'未知错误'),true);
  let c=d.result||{};
  el('baseUrl').value=c.baseUrl||'';el('model').value=c.model||'';el('autoAnalyze').checked=!!c.autoAnalyze;el('scanAI').checked=!!c.scanAI;el('apiKey').value='';
+ if(el('showNotice'))el('showNotice').checked=!c.hideNotice;
+ applySettingsState(c);
  let src=c.keySource==='env'?'（来自环境变量 '+c.keyName+'）':(c.keySource==='file'?'（存在本机配置文件里，建议改成环境变量）':'');
  let s=c.apiKeyMasked?('已配置：'+c.apiKeyMasked+src):'尚未配置';
  if(c.keyFormatProblem){s+='　⚠️ '+c.keyFormatProblem;el('keyStatus').style.color='var(--danger-fg)'}
@@ -349,12 +390,12 @@ function switchSettingsPane(pane){
  else if(settingsPane==='theme')syncThemeButtons();
 }
 async function saveSettings(){
- let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoAnalyze:el('autoAnalyze').checked,scanAI:el('scanAI').checked});
+ let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoAnalyze:el('autoAnalyze').checked,scanAI:el('scanAI').checked,hideNotice:el('showNotice')?!el('showNotice').checked:undefined});
  if(!d.ok)return alert(d.error);let r=d.result||{};let msg='设置已保存';
  if(r.keyStoredIn==='env')msg+='\nAPI Key 已写入本机环境变量 '+r.keyName+'（不落盘、不进 Git）';
  else if(r.keyStoredIn==='file')msg+='\n⚠️ 写入环境变量失败，API Key 暂存在本机加密文件里';
  if(r.keyWarning)msg+='\n\n⚠️ Key 格式提醒：'+r.keyWarning;
- el('apiKey').value='';el('settingsModal').classList.remove('open');toast(msg)
+ el('apiKey').value='';el('settingsModal').classList.remove('open');applySettingsState(r);toast(msg)
 }
 async function analyzeNow(){if(!native())return alert('AI 分析仅桌面版可用');let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoAnalyze:el('autoAnalyze').checked,scanAI:el('scanAI').checked});if(!d.ok)return alert(d.error);let cfg=await native().get_settings();if(!cfg.ok)return alert(cfg.error);if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先填写并保存');if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后再点「立即 AI 分析」。');let missing=groupItems().filter(x=>!x.aiDescription).map(x=>x.path);if(!missing.length){let done=items.filter(x=>x.aiDescription&&x.aiDescription.searchedAt);return alert('所有项目都已有 AI 说明'+(done.length?'（'+analyzedAgo(done)+'分析过）':'')+'，不用再分析。\n想重做的话，回到表格勾选项目后按住 Shift 点工具栏的「AI 分析」。')}el('settingsModal').classList.remove('open');toast('开始 AI 分析 '+missing.length+' 个项目，完成后会提示');await enrich(missing,false)}
 
@@ -400,6 +441,17 @@ async function clearKey(){
 }
 async function testConn(){let btn=el('testConn'),res=el('testResult');btn.disabled=true;res.textContent='正在测试连接…';res.style.color='var(--fg-faint)';try{if(!native()||typeof native().test_connection!=='function')throw Error('连接测试仅桌面版可用');let d=await native().test_connection({baseUrl:el('baseUrl').value,model:el('model').value,apiKey:el('apiKey').value});if(!d.ok)throw Error(d.error||'连接失败');let ok=d.modelOk===false?('模型“'+d.model+'”不在可用列表'):'连接成功';let lat=d.latencyMs!=null?(' · '+d.latencyMs+' ms'):'';let kt=d.keyTail?(' · Key 尾号 '+d.keyTail):'';res.textContent=ok+lat+kt;if(d.modelOk===false&&d.availableModels&&d.availableModels.length)res.textContent+='；可用模型：'+d.availableModels.join('、');res.style.color=d.modelOk===false?'var(--warn-fg)':'var(--ok-fg)';if(d.availableModels&&d.availableModels.length){res.title='可用模型: '+d.availableModels.join(', ');window.diagModels=d.availableModels}}catch(e){res.textContent='连接失败：'+e.message;res.style.color='var(--danger-fg)'}finally{btn.disabled=false}}
 document.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>setSort(th.dataset.sort));el('settingsBtn').onclick=()=>openSettings(settingsPane||'model');el('testConn').onclick=testConn;el('smartSearch').onclick=smartSearch;el('clearKey').onclick=clearKey;el('settingsCancel').onclick=()=>el('settingsModal').classList.remove('open');el('settingsAnalyze').onclick=analyzeNow;el('settingsSave').onclick=saveSettings;el('q').oninput=()=>{searchVersion++;naturalPaths=null;el('searchStatus').textContent='';el('smartSearch').disabled=false;el('smartSearch').classList.remove('searching');el('smartSearch').textContent='智能搜索';render()};el('q').onkeydown=e=>{if(e.key==='Enter')smartSearch()};el('filter').onchange=render;el('onlyNew').onchange=render;el('root').onchange=()=>{if(el('root').value==='__add__'){el('root').value='';addRoot()}else render()};el('rescan').onclick=()=>load(true);el('keep').onclick=()=>action('keep');el('move').onclick=()=>openMoveDialog(selectedPaths());el('del').onclick=()=>action('delete');el('all').onchange=e=>{visible().forEach(x=>e.target.checked?chosen.add(x.id):chosen.delete(x.id));render()};
+el('noticeClose').onclick=async()=>{
+	hideNotice=true;syncNotice();
+	if(el('showNotice'))el('showNotice').checked=false;
+	let api=native(),saved=false;
+	if(api&&typeof api.save_settings==='function'){try{let d=await api.save_settings({hideNotice:true});saved=!!(d&&d.ok)}catch(_){}}
+	toast(saved?'已关闭这条提示，之后不再自动显示；想恢复：设置 → 外观与主题 → 勾「启动时显示顶部提示条」':'已关闭这条提示（本次有效）')
+};
+el('showNotice').onchange=()=>{hideNotice=!el('showNotice').checked;syncNotice()};
+el('qa').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();qaSubmit()}else if(e.key==='Escape'){e.preventDefault();el('qa').value='';el('qa').blur()}};
+el('qa').onfocus=()=>{if(!llmReady)toast('要使用自动问答，请先到「设置」中配置 LLM KEY',true)};
+syncQa();
 let started=false;async function startWhenReady(){if(started)return;let api=native();if(api&&typeof api.scan==='function'&&typeof api.enrich==='function'){started=true;el('status').textContent='原生接口已连接';try{let v=await api.app_version();if(v&&v.ok&&v.result)el('ver').textContent='V'+v.result}catch(_){}try{let gl=await api.group_list();if(gl&&gl.ok&&Array.isArray(gl.result)&&gl.result.length){scanGroups=gl.result.slice();if(!groupOf(activeGroup))activeGroup=scanGroups[0].id;renderTags();fillRootSelect();refreshCounts()}}catch(_){}await load(false);return}el('status').textContent='正在连接本机分析接口…';setTimeout(startWhenReady,200)}window.addEventListener('pywebviewready',startWhenReady);startWhenReady();
 
 async function editNote(td){
