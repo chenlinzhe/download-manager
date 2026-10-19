@@ -10,7 +10,8 @@ if getattr(__import__('sys'),'frozen',False):
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
 GROUPS_FILE=APP/'resource_groups.json'
-APP_VERSION='2.6'
+AI_HIDDEN_FILE=APP/'ai_hidden.json'
+APP_VERSION='2.7'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -801,7 +802,7 @@ def enrich_items(paths, force=False, deep=False):
  with LOCK: cached_items=list(CACHE.get('items',[]))
  data={'items':cached_items} if cached_items else scan()
  targets=[item for item in data['items'] if item['path'] in wanted]
- results={}; errors={}; pending=[]
+ results={}; errors={}; pending=[]; fresh=[]
  for item in targets:
   fp=item_fingerprint(item)
   # V2.6：你已经标注过这一格＝以你的版本为准，批量分析时直接跳过，不花额度也不覆盖你的话；
@@ -825,8 +826,13 @@ def enrich_items(paths, force=False, deep=False):
    item=futures[future]
    try:
     _,desc=future.result(); cache[item_fingerprint(item)]=desc; results[item['path']]=desc
+    fresh.append(item['path'])
    except Exception as e: errors[item['path']]=str(e)
  if pending: save_json_file(AI_CACHE_FILE,cache)
+ if fresh:  # 重做成功：把「你删掉过」的记录去掉，新说明照常显示
+  hidden=load_ai_hidden()
+  for path in fresh: hidden.pop(path,None)
+  save_ai_hidden(hidden)
  return {'ok':not errors,'result':results,'errors':errors,'skipped':skipped,'deep':bool(deep)}
 
 def collection_signature(p):
@@ -922,6 +928,20 @@ def load_notes():
   return data if isinstance(data,dict) else {}
  except (OSError,json.JSONDecodeError): return {}
 
+def load_ai_hidden():
+ """你亲手删掉 AI 说明的那几格：记在名单里，重新扫描 / 批量分析都不会把它再写回来。"""
+ try:
+  data=json.loads(AI_HIDDEN_FILE.read_text(encoding='utf-8'))
+  return data if isinstance(data,dict) else {}
+ except (OSError,json.JSONDecodeError): return {}
+
+def save_ai_hidden(hidden):
+ hidden=hidden if isinstance(hidden,dict) else {}
+ tmp=AI_HIDDEN_FILE.with_suffix('.tmp')
+ tmp.parent.mkdir(parents=True,exist_ok=True)
+ tmp.write_text(json.dumps(hidden,ensure_ascii=False,indent=2),encoding='utf-8'); os.replace(tmp,AI_HIDDEN_FILE)
+ return hidden
+
 def fold_note(text):
  """把用户写的说明收成存下来的样子：换行保留（格子按多行原样显示），行内多余空白收成一个空格。"""
  raw=str(text or '').replace('\r\n','\n').replace('\r','\n')
@@ -930,24 +950,33 @@ def fold_note(text):
  while lines and not lines[-1]: lines.pop()
  return '\n'.join(lines)[:400]
 
-def save_note(path, text):
- """保存用户改过 / 补过的说明（按包路径存，最多 400 字，可以多行；留空即删除，等于恢复 AI 的说明）。
+def save_note(path, text, hide_ai=False):
+ """保存用户改过 / 补过的说明（按包路径存，最多 400 字，可以多行）。
+ hide_ai=True：用户把这一格整个删掉了——连 AI 那句一起删掉，之后扫描 / 批量分析都不会把它写回来，
+ 想让它再写就按住 Shift 点「AI 分析」重做（重做成功会自动解除）。
  格子显示的就是它，原样呈现、不加标签，以用户的版本为准。"""
- notes=load_notes(); key=str(path or '')
+ notes=load_notes(); hidden=load_ai_hidden(); key=str(path or '')
  if not key: raise ValueError('缺少包路径')
  note=fold_note(text)
- if note: notes[key]=note
- else: notes.pop(key,None)
+ if note:
+  notes[key]=note; hidden.pop(key,None)
+ elif hide_ai:
+  notes.pop(key,None); hidden[key]=datetime.now().isoformat(timespec='seconds')
+ else:
+  notes.pop(key,None); hidden.pop(key,None)
  tmp=NOTES_FILE.with_suffix('.tmp')
  tmp.parent.mkdir(parents=True,exist_ok=True)
  tmp.write_text(json.dumps(notes,ensure_ascii=False,indent=2),encoding='utf-8'); os.replace(tmp,NOTES_FILE)
- return {'path':key,'note':note}
+ save_ai_hidden(hidden)
+ return {'path':key,'note':note,'aiHidden':key in hidden}
 
 def _with_notes(data):
  if not isinstance(data,dict) or not isinstance(data.get('items'),list): return data
- notes=load_notes()
+ notes=load_notes(); hidden=load_ai_hidden()
  for item in data['items']:
-  if isinstance(item,dict): item['note']=notes.get(str(item.get('path')),'')
+  if isinstance(item,dict):
+   item['note']=notes.get(str(item.get('path')),'')
+   item['aiHidden']=str(item.get('path')) in hidden
  return data
 
 def load_ignore():

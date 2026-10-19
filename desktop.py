@@ -64,8 +64,8 @@ class Api:
  def enrich(self, paths, force=False, deep=False):
   try: return server.enrich_items(paths, force, deep)
   except Exception as e: return {'ok':False,'error':str(e)}
- def set_note(self, path, text):
-  try: return {'ok':True,'result':server.save_note(path,text)}
+ def set_note(self, path, text, hide_ai=False):
+  try: return {'ok':True,'result':server.save_note(path,text,hide_ai)}
   except Exception as e: return {'ok':False,'error':str(e)}
  def add_group(self, name):
   try: return {'ok':True,'result':server.add_group(name)}

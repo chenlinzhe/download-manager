@@ -232,7 +232,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </head>
 <body>
 <header>
- <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V2.6</span></div>
+ <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V2.7</span></div>
  <div class="qa-wrap"><input id="qa" class="qa-input" type="search" autocomplete="off" spellcheck="false" placeholder="自动问答：问一句，Enter 提交" title="要使用自动问答，请先到「设置」中配置 LLM KEY" aria-label="自动问答"></div>
  <div class="header-right">
   <span id="status">准备加载…</span>
@@ -291,7 +291,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    <thead><tr>
     <th style="width:36px"><input type="checkbox" id="all" aria-label="全选"></th>
     <th class="sortable" data-sort="name">包 / 路径</th>
-    <th class="sortable" data-sort="ai" title="AI 说明：勾选这一行后点工具栏的「AI 分析」，DeepSeek 一句话讲清这是什么包；没分析过显示「--」。点这一格可以直接改，AI 的话会一起载入，保存后以你写的为准。不点「AI 分析」就不会联网。">AI 说明：这是个什么包</th>
+    <th class="sortable" data-sort="ai" title="AI 说明：勾选这一行后点工具栏的「AI 分析」，DeepSeek 一句话讲清这是什么包；没分析过显示「--」。双击这一格可以直接改，AI 的话会一起载入，保存后以你写的为准；全删干净保存＝连 AI 那句一起删掉。不点「AI 分析」就不会联网。">AI 说明：这是个什么包</th>
     <th class="sortable" data-sort="rec">建议</th>
     <th class="sortable" data-sort="score">价值分</th>
     <th class="sortable" data-sort="size" title="大小与文件数不含 node_modules、.git、venv 这类依赖与缓存目录（只按一个目录算，不逐个文件数），所以大项目也会很快扫完">大小</th>
@@ -312,7 +312,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    <button type="button" class="nav-item" data-pane="ignore" title="查看并撤销被忽略的项目名字">忽略名单</button>
    <button type="button" class="nav-item" data-pane="theme" title="跟随系统 / 浅色 / 深色">外观与主题</button>
    <button type="button" class="nav-item" data-pane="guide" title="逐条说明软件里的每个功能：扫描、建议、AI 分析、批量操作、设置">功能说明</button>
-   <div class="nav-foot">下载包管家 V2.6<br>程序不会运行任何安装包</div>
+   <div class="nav-foot">下载包管家 V2.7<br>程序不会运行任何安装包</div>
   </nav>
   <section class="settings-body">
    <div class="pane" data-pane="model">
@@ -411,7 +411,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
      <ul>
       <li><b>勾选框</b>：勾上后才能用右侧按钮批量操作；表头那个勾是全选 / 全不选。</li>
       <li><b>包 / 路径</b>：名称、所在目录（点一下直接在资源管理器里打开）、类型和文件数；本次扫描新出现的项目带「新增」徽章。</li>
-      <li><b>AI 说明：这是个什么包</b>：一句话说明，AI 说的前面标「<b>AI：</b>」，后面用小字标「多久前分析的」。<b>说得不准就直接点这一格改</b>：改完这一格原样显示你写的字，不加任何标签；再点进去时 AI 那句会一起载入，以你最终改的为准。</li>
+      <li><b>AI 说明：这是个什么包</b>：一句话说明，AI 说的前面标「<b>AI：</b>」，后面用小字标「多久前分析的」。<b>说得不准就双击这一格改</b>：改完这一格原样显示你写的字，不加任何标签；再双击进去时 AI 那句会一起载入，以你最终改的为准。不想要 AI 这句，就把框里全删干净再保存。</li>
       <li><b>建议</b>：保留（手工）／建议保留／待确认／不用保住。手工保留的徽章旁带一个小 ✕，点它就能取消保留。</li>
       <li><b>价值分</b>：0 到 100 的留用价值，越低越该清理（38 分以下为「不用保住」，65 分以上为「建议保留」）。</li>
       <li><b>大小</b>、<b>时间</b>：体积与最近修改日期，下面小字是「多少天前」。</li>
@@ -453,11 +453,12 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
      <h3>九、改掉 AI 的说明（你说了算）</h3>
      <ul>
       <li><b>为什么能改</b>：AI 只看文件名、大小、时间和压缩包里的清单，名字含糊的包（比如 <code>setup_v2.exe</code>）可能说错、可能只说一半。</li>
-      <li><b>怎么改</b>：点「AI 说明」这一格（或右键 →「改这一格的说明」）。框里已经载入 AI 那句（前面标「AI：」），在它上面改、或直接在下面接着写自己的话；<kbd>Enter</kbd> 换行，<kbd>Ctrl</kbd>+<kbd>Enter</kbd> 或点别处保存，<kbd>Esc</kbd> 放弃。</li>
+      <li><b>怎么改</b>：<b>双击</b>「AI 说明」这一格（或右键 →「改这一格的说明」），单击不会进去。框里已经载入 AI 那句（前面标「AI：」），在它上面改、或直接在下面接着写自己的话；<kbd>Enter</kbd> 换行，<kbd>Ctrl</kbd>+<kbd>Enter</kbd> 或点别处保存，<kbd>Esc</kbd> 放弃。</li>
       <li><b>改完是什么样</b>：格子只显示你写的字，原样呈现、不加标签；写了多行就按行显示。</li>
-      <li><b>想恢复 AI 的说法</b>：再点这一格，把内容清空后保存即可；只留下 AI 那一行也一样恢复。</li>
+      <li><b>想删掉 AI 这句</b>：双击进去，把框里的字全删干净再保存——这一格就空了，重新扫描、批量分析都不会把它写回来；想让它重写，按住 <kbd>Shift</kbd> 点「AI 分析」重做。</li>
+      <li><b>想回到 AI 自己说的</b>：双击进去，把任意其它内容清掉、只留下「AI：…」那一行保存即可。</li>
       <li><b>重新分析会跳过你改过的</b>：批量点「AI 分析」时，你标注过的项目不动，信息条会写「另 N 项已跳过」。只有单独分析这一项、而它已经有你的标注，才会先问一句「是否继续」——确认后重新分析，并<b>深挖子目录内容</b>。</li>
-      <li>最多 400 字，可以多行。你的版本存在本机 <code>user_notes.json</code>，随扫描一直保留，也会被搜索框匹配到。</li>
+      <li>最多 400 字，可以多行。你的版本存在本机 <code>user_notes.json</code>，你删掉过 AI 说明的记录在 <code>ai_hidden.json</code>，都随扫描一直保留，也会被搜索框匹配到。</li>
      </ul>
      <h3>十、右键菜单</h3>
      <ul>
@@ -550,6 +551,6 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="ctxMenu" class="ctx-menu"></div>
-<script src="app.js?v=20260820-36"></script>
+<script src="app.js?v=20260820-37"></script>
 </body>
 </html>

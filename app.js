@@ -148,12 +148,14 @@ async function renameGroup(gid){
 /* V2.6：这一格只说一句话——你写的原样显示（不加任何标签），AI 说的前面标「AI：」 */
 function aiBox(x){
 	let a=x.aiDescription,sum=(a&&a.summary)?String(a.summary):'',note=String(x.note||'').trim();
+	if(x.aiHidden)sum='';   /* V2.7：你亲手删掉的 AI 说明不再显示，也不再被写回来 */
 	let when=(sum&&a.searchedAt)?'<span class="ai-when" title="AI 这段说明生成于 '+esc(String(a.searchedAt).replace('T',' '))+(a.model?'（'+esc(a.model)+'）':'')+'">'+esc(whenAgo(a.searchedAt))+'</span>':'';
 	if(note)return '<div class="ai mine">'+esc(note)+'</div>';
 	if(sum)return '<div class="ai"><b>AI：</b>'+esc(sum)+when+'</div>';
-	return '<span class="muted" title="还没有说明：勾选这一行后点工具栏的「AI 分析」，或者直接点这一格自己写。">--</span>'
+	if(x.aiHidden)return '';   /* 你把这一格删干净了：空着，不再把 AI 那句写回来 */
+	return '<span class="muted" title="还没有说明：勾选这一行后点工具栏的「AI 分析」，或者双击这一格自己写。">--</span>'
 }
-function render(){let v=visible();el('body').innerHTML=v.length?v.map(x=>'<tr data-path="'+esc(x.path)+'"><td><input class="pick" type="checkbox" data-id="'+esc(x.id)+'" '+(chosen.has(x.id)?'checked':'')+'></td><td><div class="name">'+esc(x.displayName||x.name)+(x.isNew?' <span class="new">新增</span>':'')+'</div><button class="path open-path" data-path="'+esc(x.parentPath||x.path)+'" title="打开包所在目录">所在目录：'+esc(x.parentPath||x.path)+'</button><div class="muted">'+esc(x.kind)+' · '+x.files+' 文件</div></td><td class="llm" data-path="'+esc(x.path)+'" title="点一下可以改这一格">'+aiBox(x)+'</td><td><span class="badge '+cls(x.recommendation)+'">'+x.recommendation+(x.manualKeep?'<button class="badge-x" data-unkeep="'+esc(x.path)+'" title="取消保留（按实际情况重新评估）">✕</button>':'')+'</span></td><td><b>'+x.score+'</b></td><td>'+fmt(x.size)+'</td><td>'+esc(x.modified.slice(0,10))+'<div class="muted">'+x.ageDays+' 天前</div></td><td>'+esc(x.redownload)+'</td><td class="'+(x.suspicious?'warn':'')+'">'+esc(x.registration)+'</td><td class="why">'+x.reasons.map(esc).join('；')+'</td></tr>').join(''):'<tr><td colspan="10" class="empty">没有符合筛选条件的项目</td></tr>';document.querySelectorAll('.open-path').forEach(e=>e.onclick=async()=>{let d=await native().open_path(e.dataset.path);if(!d.ok)alert(d.error)});document.querySelectorAll('button.badge-x').forEach(b=>b.onclick=e=>{e.stopPropagation();unkeepRows([b.dataset.unkeep])});document.querySelectorAll('td.llm').forEach(td=>td.onclick=()=>editNote(td));document.querySelectorAll('.pick').forEach(e=>e.onchange=()=>{e.checked?chosen.add(e.dataset.id):chosen.delete(e.dataset.id);update()});update()}function selectedItems(){return items.filter(x=>chosen.has(x.id))}
+function render(){let v=visible();el('body').innerHTML=v.length?v.map(x=>'<tr data-path="'+esc(x.path)+'"><td><input class="pick" type="checkbox" data-id="'+esc(x.id)+'" '+(chosen.has(x.id)?'checked':'')+'></td><td><div class="name">'+esc(x.displayName||x.name)+(x.isNew?' <span class="new">新增</span>':'')+'</div><button class="path open-path" data-path="'+esc(x.parentPath||x.path)+'" title="打开包所在目录">所在目录：'+esc(x.parentPath||x.path)+'</button><div class="muted">'+esc(x.kind)+' · '+x.files+' 文件</div></td><td class="llm" data-path="'+esc(x.path)+'" title="'+esc(x.aiHidden?'双击可以改这一格；AI 说明已被你删掉，想让它重写就按住 Shift 点「AI 分析」':'双击可以改这一格')+'">'+aiBox(x)+'</td><td><span class="badge '+cls(x.recommendation)+'">'+x.recommendation+(x.manualKeep?'<button class="badge-x" data-unkeep="'+esc(x.path)+'" title="取消保留（按实际情况重新评估）">✕</button>':'')+'</span></td><td><b>'+x.score+'</b></td><td>'+fmt(x.size)+'</td><td>'+esc(x.modified.slice(0,10))+'<div class="muted">'+x.ageDays+' 天前</div></td><td>'+esc(x.redownload)+'</td><td class="'+(x.suspicious?'warn':'')+'">'+esc(x.registration)+'</td><td class="why">'+x.reasons.map(esc).join('；')+'</td></tr>').join(''):'<tr><td colspan="10" class="empty">没有符合筛选条件的项目</td></tr>';document.querySelectorAll('.open-path').forEach(e=>e.onclick=async()=>{let d=await native().open_path(e.dataset.path);if(!d.ok)alert(d.error)});document.querySelectorAll('button.badge-x').forEach(b=>b.onclick=e=>{e.stopPropagation();unkeepRows([b.dataset.unkeep])});document.querySelectorAll('td.llm').forEach(td=>td.ondblclick=()=>editNote(td));document.querySelectorAll('.pick').forEach(e=>e.onchange=()=>{e.checked?chosen.add(e.dataset.id):chosen.delete(e.dataset.id);update()});update()}function selectedItems(){return items.filter(x=>chosen.has(x.id))}
 function selectedPaths(){return selectedItems().map(x=>x.path)}
 function update(){
  let n=chosen.size,picked=selectedItems();
@@ -585,11 +587,11 @@ async function editNote(td){
 	if(typing){typing.focus();return}
 	let path=td.dataset.path,item=items.find(x=>x.path===path);
 	let cur=String((item&&item.note)||'').replace(/\r\n/g,'\n').trim();
-	let ai=(item&&item.aiDescription&&item.aiDescription.summary)?String(item.aiDescription.summary).trim():'';
+	let ai=(item&&!item.aiHidden&&item.aiDescription&&item.aiDescription.summary)?String(item.aiDescription.summary).trim():'';
 	let aiLine=ai?('AI：'+ai):'';
 	let start=cur?(aiLine?(cur+'\n'+aiLine):cur):aiLine;   /* 改的时候 AI 的话也载入，方便对照；最后以你写的为准 */
 	let old=td.innerHTML;
-	td.innerHTML='<textarea class="note-edit" rows="3" spellcheck="false" autocomplete="off" title="Enter 换行 · Ctrl+Enter 或点别处保存 · Esc 取消 · 清空后保存＝恢复 AI"></textarea>';
+	td.innerHTML='<textarea class="note-edit" rows="3" spellcheck="false" autocomplete="off" title="Enter 换行 · Ctrl+Enter 或点别处保存 · Esc 取消 · 全删干净保存＝连 AI 那句一起删掉；只留 AI 那句＝恢复 AI"></textarea>';
 	let inp=td.querySelector('textarea.note-edit');
 	inp.value=start;
 	inp.focus();
@@ -599,21 +601,23 @@ async function editNote(td){
 	const finish=async save=>{
 		if(closed)return;
 		closed=true;
-		let v=save?inp.value.replace(/\r\n/g,'\n'):'';
+		let raw=save?inp.value.replace(/\r\n/g,'\n'):'',v=raw;
 		if(aiLine){
 			if(v.endsWith('\n'+aiLine))v=v.slice(0,-(aiLine.length+1));   /* 没动 AI 那一行＝只存你自己写的 */
 			if(v===aiLine)v='';                                          /* 只剩 AI 那句＝恢复 AI 显示 */
 		}
 		v=v.trim();
-		if(!save||v===cur){td.innerHTML=old;return}
+		let blank=!raw.trim(),hideAI=blank&&!!aiLine;   /* 全删干净＝连 AI 那句一起删掉 */
+		if(!save||(v===cur&&!hideAI)){td.innerHTML=old;return}
 		if(v===ai)v='';
 		if(!native()||typeof native().set_note!=='function'){toast('改说明仅桌面版可用',true);td.innerHTML=old;return}
 		let d;
-		try{d=await native().set_note(path,v)}catch(e){d={ok:false,error:e.message}}
+		try{d=await native().set_note(path,v,hideAI)}catch(e){d={ok:false,error:e.message}}
 		if(!d||!d.ok){toast('保存失败：'+((d&&d.error)||'未知错误'),true);td.innerHTML=old;return}
-		if(item)item.note=(d.result&&d.result.note)||'';
+		if(item){item.note=(d.result&&d.result.note)||'';item.aiHidden=!!(d.result&&d.result.aiHidden)}
 		td.innerHTML=item?aiBox(item):old;
-		let msg=v?'已保存':'已恢复 AI';
+		if(item)td.title=item.aiHidden?'双击可以改这一格；AI 说明已被你删掉，想让它重写就按住 Shift 点「AI 分析」':'双击可以改这一格';
+		let msg=hideAI?'已删除 AI 说明':(v?'已保存':(aiLine?'已恢复 AI':'已清空'));
 		toast(msg);
 		infoDone(msg,false)
 	};

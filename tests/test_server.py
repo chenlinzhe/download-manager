@@ -18,7 +18,8 @@ class TempApp(unittest.TestCase):
         self._saved = {}
         for name in ('SETTINGS_FILE', 'LABELS_FILE', 'SNAPSHOT_FILE', 'INVENTORY_FILE',
                      'AI_CACHE_FILE', 'COLLECTION_CACHE_FILE', 'COLLECTION_FAIL_FILE',
-                     'MANUAL_ROOTS_FILE', 'NOTES_FILE', 'IGNORE_FILE', 'GROUPS_FILE'):
+                     'MANUAL_ROOTS_FILE', 'NOTES_FILE', 'IGNORE_FILE', 'GROUPS_FILE',
+                     'AI_HIDDEN_FILE'):
             self._saved[name] = getattr(server, name)
             setattr(server, name, self.dir / (name.lower() + '.json'))
         self._roots = server.roots
@@ -365,7 +366,7 @@ class TestLlmError(unittest.TestCase):
 
 
 class TestNotes(TempApp):
-    """这一格的说明：你写的字原样存、可以多行、参与搜索，且不动 AI 说明本身。"""
+    """这一格的说明：你写的字原样存、可以多行、参与搜索；你也可以把 AI 那句一起删掉。"""
 
     def test_save_and_reload(self):
         path = 'D:\\Downloads\\tool.zip'
@@ -415,6 +416,48 @@ class TestNotes(TempApp):
         merged = server._with_notes(data)
         self.assertEqual(merged['items'][0]['note'], u'这是佳能打印机的驱动安装包，别删')
         self.assertEqual(merged['items'][0]['aiDescription']['summary'], u'某个安装程序')
+
+    def test_delete_ai_leaves_the_cell_empty(self):
+        """把框里全删干净＝连 AI 那句一起删掉：格子空着，列表里记下 aiHidden。"""
+        path = 'D:\\Downloads\\canon.exe'
+        r = server.save_note(path, u'   ', True)
+        self.assertTrue(r['aiHidden'])
+        self.assertEqual(r['note'], '')
+        self.assertNotIn(path, server.load_notes())
+        self.assertIn(path, server.load_ai_hidden())
+        merged = server._with_notes({'items': [{'path': path}]})
+        self.assertTrue(merged['items'][0]['aiHidden'])
+        self.assertEqual(merged['items'][0]['note'], '')
+
+    def test_writing_your_own_note_cancels_the_delete(self):
+        path = 'D:\\Downloads\\canon.exe'
+        server.save_note(path, u'', True)
+        r = server.save_note(path, u'佳能打印机驱动')
+        self.assertFalse(r['aiHidden'])
+        self.assertNotIn(path, server.load_ai_hidden())
+        self.assertEqual(server.load_notes()[path], u'佳能打印机驱动')
+
+    def test_restore_ai_clears_the_delete(self):
+        """只留 AI 那一行保存＝恢复 AI，删除记录也要清掉。"""
+        path = 'D:\\Downloads\\canon.exe'
+        server.save_note(path, u'', True)
+        r = server.save_note(path, u'')
+        self.assertFalse(r['aiHidden'])
+        self.assertNotIn(path, server.load_ai_hidden())
+
+    def test_hidden_list_survives_reload(self):
+        path = 'D:\\Downloads\\x.msi'
+        server.save_note(path, u'', True)
+        self.assertEqual(server.load_ai_hidden(), {path: server.load_ai_hidden()[path]})
+
+    def test_note_discards_previous_delete(self):
+        """先删后写：你后来写的话要显示，不能被旧的删除记录压住。"""
+        path = 'D:\\Downloads\\canon.exe'
+        server.save_note(path, u'', True)
+        server.save_note(path, u'留着')
+        merged = server._with_notes({'items': [{'path': path}]})
+        self.assertFalse(merged['items'][0]['aiHidden'])
+        self.assertEqual(merged['items'][0]['note'], u'留着')
 
     def test_note_survives_reload(self):
         """写完再读（相当于重新扫描）仍然是用户的版本。"""
@@ -785,6 +828,17 @@ class TestEnrichForce(TempApp):
         self.assertEqual(self.calls, [self.items[0]['path']], u'深挖要忽略缓存再问一次')
         self.assertEqual(self.deeps, [True], u'deep 要传到 deepseek_description')
         self.assertTrue(out['deep'])
+
+    def test_redo_brings_a_deleted_ai_back(self):
+        """你把 AI 那句删掉了，按住 Shift 重做成功就得把它写回来。"""
+        path = self.items[0]['path']
+        server.enrich_items([path])
+        server.save_note(path, u'', True)
+        self.assertIn(path, server.load_ai_hidden())
+        server.enrich_items([path])
+        self.assertIn(path, server.load_ai_hidden(), u'没重做就不能把删掉的写回来')
+        server.enrich_items([path], True)
+        self.assertNotIn(path, server.load_ai_hidden())
 
     def test_deep_redoes_even_if_you_noted_it(self):
         """单独分析 + 你确认继续＝重做，不受「标注过就跳过」影响。"""
