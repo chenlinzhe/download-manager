@@ -10,7 +10,7 @@ if getattr(__import__('sys'),'frozen',False):
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
 GROUPS_FILE=APP/'resource_groups.json'
-APP_VERSION='2.3'
+APP_VERSION='2.4'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -533,15 +533,17 @@ def get_settings(reveal=False):
  cfg['keySource']='env' if env_key else ('file' if file_key else '')
  cfg['keyTail']=key_tail(key)
  cfg['keyFormatProblem']=key_format_problem(key)
+ cfg['keyBackup']=bool(file_key)  # 本机是否留有 DPAPI 加密的备份（环境变量被改坏/清掉时能恢复）
+ cfg['apiKeyBackupMasked']=('••••'+key_tail(file_key)) if file_key else ''
  if not reveal:
   cfg['apiKeyMasked']=('••••'+cfg['keyTail']) if key else ''; cfg['apiKey']=''
   return cfg
  cfg['apiKey']=key; return cfg
 
-_DERIVED=('apiKey','apiKeyMasked','apiKeyEnc','keyName','keySource','keyTail','keyFormatProblem','keyStoredIn','keyWarning')
+_DERIVED=('apiKey','apiKeyMasked','apiKeyEnc','keyName','keySource','keyTail','keyFormatProblem','keyStoredIn','keyWarning','keyBackup','apiKeyBackupMasked')
 
 def save_settings(data):
- """保存设置。API Key 只写进本机环境变量，配置文件里不留任何 Key。"""
+ """保存设置。API Key 写进本机环境变量，同时在配置文件里留一份只有本机当前用户能解密的备份（DPAPI）。"""
  old=get_settings(True); key=str(data.get('apiKey','')).strip()
  prev_enc=str(load_json_file(SETTINGS_FILE,{}).get('apiKeyEnc') or '')
  existing=str(old.get('apiKey') or '')
@@ -560,14 +562,24 @@ def save_settings(data):
  old['destination']=str(data.get('destination') or old.get('destination') or '').strip()
  old['hideNotice']=bool(data.get('hideNotice',old.get('hideNotice',False)))  # 顶部提示条：用户点过 ✕ 就不再自动显示
  for name in _DERIVED: old.pop(name,None)
- if stored=='file':
-  token=protect_key(key) if key else prev_enc
-  if token: old['apiKeyEnc']=token
+ backup=''  # 加密备份：只有本机当前用户能解开，明文永远不落盘
+ if data.get('clearApiKey'): backup=''
+ elif key: backup=protect_key(key) or prev_enc
+ elif existing and stored=='file': backup=prev_enc
+ if backup: old['apiKeyEnc']=backup
+ else: old.pop('apiKeyEnc',None)
  save_json_file(SETTINGS_FILE,old); out=get_settings(False)
  out['keyStoredIn']=stored
  out['keyWarning']=key_format_problem(key) if key else ''
  return out
 
+def restore_key_backup():
+ """把配置文件里的 DPAPI 备份重新写回用户环境变量：环境变量被清掉或被写坏时用这个兜底。"""
+ raw=load_json_file(SETTINGS_FILE,{})
+ key=unprotect_key(raw.get('apiKeyEnc')) or str(raw.get('apiKey') or '')
+ if not key: raise ValueError('本机没有可用的 Key 备份，请重新填写一次 Key 并保存')
+ if not set_user_env_key(key): raise RuntimeError('写不进用户环境变量（可能被权限或安全软件拦住），请手动填写 Key')
+ return get_settings(False)
 def test_connection(baseUrl=None, model=None, apiKey=None):
  import urllib.request, urllib.error, time
  cfg=get_settings(True)

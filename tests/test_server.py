@@ -198,7 +198,7 @@ class TestMove(TempApp):
 
 
 class TestSettings(TempApp):
-    """API Key 只存本机环境变量：配置文件里不留 Key，也不会进 Git。"""
+    """API Key 存本机环境变量 + 一份 DPAPI 加密备份：明文永不落盘，也不会进 Git。"""
 
     def setUp(self):
         super().setUp()
@@ -222,7 +222,8 @@ class TestSettings(TempApp):
         self.assertEqual(self.env.stored[server.ENV_KEY_NAME], 'sk-' + 'a' * 32)
         raw = self._raw()
         self.assertNotIn('apiKey', raw, '明文 Key 不应落盘')
-        self.assertNotIn('apiKeyEnc', raw, 'Key 不该写进配置文件')
+        self.assertTrue(raw.get('apiKeyEnc'), '应留一份 DPAPI 加密备份')
+        self.assertNotIn('sk-' + 'a' * 32, json.dumps(raw), '备份必须是密文，不能出现明文')
         self.assertEqual(server.get_settings(False)['keySource'], 'env')
         self.assertEqual(server.get_settings(False)['apiKeyMasked'][-4:], 'aaaa')
 
@@ -255,6 +256,37 @@ class TestSettings(TempApp):
         self.assertEqual(out['keyStoredIn'], 'env')
         self.assertEqual(self.env.stored[server.ENV_KEY_NAME], 'sk-legacy')
         self.assertNotIn('apiKey', self._raw())
+
+    def test_backup_is_reported_and_used_when_env_lost(self):
+        server.save_settings({'apiKey': 'sk-' + 'd' * 32})
+        got = server.get_settings(False)
+        self.assertTrue(got['keyBackup'])
+        self.assertEqual(got['apiKeyBackupMasked'][-4:], 'dddd')
+        self.env.stored.pop(server.ENV_KEY_NAME, None)  # 模拟环境变量被清掉
+        got = server.get_settings(True)
+        self.assertEqual(got['apiKey'], 'sk-' + 'd' * 32, '环境变量没了应能用备份兜底')
+        self.assertEqual(got['keySource'], 'file')
+
+    def test_restore_key_backup_writes_env_again(self):
+        server.save_settings({'apiKey': 'sk-' + 'e' * 32})
+        self.env.stored[server.ENV_KEY_NAME] = 'sk-badkey'  # 模拟被别的工具改坏
+        self.assertEqual(server.get_settings(True)['apiKey'], 'sk-badkey')
+        out = server.restore_key_backup()
+        self.assertEqual(self.env.stored[server.ENV_KEY_NAME], 'sk-' + 'e' * 32)
+        self.assertEqual(out['apiKeyMasked'][-4:], 'eeee')
+        self.assertEqual(server.get_settings(True)['apiKey'], 'sk-' + 'e' * 32)
+
+    def test_restore_key_backup_without_backup_raises(self):
+        server.save_settings({'clearApiKey': True})
+        with self.assertRaises(ValueError):
+            server.restore_key_backup()
+
+    def test_clear_key_also_drops_backup(self):
+        server.save_settings({'apiKey': 'sk-' + 'f' * 32})
+        self.assertIn('apiKeyEnc', self._raw())
+        server.save_settings({'clearApiKey': True})
+        self.assertNotIn('apiKeyEnc', self._raw())
+        self.assertFalse(server.get_settings(False)['keyBackup'])
 
     def test_default_model_exists_in_catalog(self):
         self.assertEqual(server.get_settings(False)['model'], 'deepseek-flash')

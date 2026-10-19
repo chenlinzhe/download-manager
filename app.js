@@ -247,8 +247,8 @@ function syncQa() {
 	let q = el('qa'); if (!q) return;
 	if (llmReady) {
 		q.classList.remove('qa-locked');
-		q.title = '自动问答：在这里直接问一句，按 Enter 提交（走「智能搜索」的关键词 + AI 语义，会请求 DeepSeek）';
-		q.placeholder = '自动问答：问一句，Enter 提交'
+		q.title = '功能问答：问一句软件怎么用的问题，按 Enter 出答案（会把功能说明 + README 全文发给 DeepSeek）；想按关键词过滤表格就打到下面的搜索框';
+		q.placeholder = '自动问答：问一句怎么用，Enter 出答案'
 	} else {
 		q.classList.add('qa-locked');
 		q.title = '要使用自动问答，请先到「设置」中配置 LLM KEY';
@@ -304,20 +304,64 @@ async function askKb() {
 		if (el('kbMeta')) el('kbMeta').textContent = kbMetaBase();
 		return
 	}
-	let r = d.result || {}, u = r.usage || {}, bits = [];
+	let r = d.result || {};
 	if (box) { box.className = 'kb-answer'; box.textContent = r.answer || '（模型没有给出内容）' }
-	if (r.model) bits.push('模型 ' + r.model);
+	if (el('kbMeta')) el('kbMeta').textContent = kbMetaLine(r)
+}
+function kbMetaLine(r) {
+	let u = (r && r.usage) || {}, bits = [];
+	if (r && r.model) bits.push('模型 ' + r.model);
 	if (u.prompt) bits.push('送入 ' + u.prompt + ' tokens' + (u.cached ? '（缓存命中 ' + u.cached + '）' : ''));
 	if (u.completion) bits.push('回答 ' + u.completion + ' tokens');
-	if (r.latencyMs) bits.push((r.latencyMs / 1000).toFixed(1) + ' 秒');
-	if (r.kb && r.kb.tokens) bits.push('知识库约 ' + r.kb.tokens + ' tokens');
-	if (el('kbMeta')) el('kbMeta').textContent = bits.join(' · ')
+	if (r && r.latencyMs) bits.push((r.latencyMs / 1000).toFixed(1) + ' 秒');
+	if (r && r.kb && r.kb.tokens) bits.push('知识库约 ' + r.kb.tokens + ' tokens');
+	return bits.join(' · ')
+}
+/* ---------- V2.4：标题栏「自动问答」直接出答案（以前它会把这句当成搜索词） ---------- */
+let askBusy = false, askQuestion = '';
+function askModalOpen(on) { let m = el('askModal'); if (m) m.classList.toggle('open', !!on) }
+async function askFromHeader(text) {
+	let api = native(), box = el('askA'), meta = el('askKbMeta');
+	if (!api || typeof api.ask_help !== 'function') { toast('功能问答仅桌面版可用', true); return }
+	if (askBusy) { toast('上一条还在回答，稍等一下'); return }
+	askQuestion = text;
+	if (el('askQ')) el('askQ').textContent = '问：' + text;
+	if (box) { box.hidden = false; box.className = 'kb-answer'; box.textContent = '正在把功能说明全文发给 DeepSeek…' }
+	if (meta) meta.textContent = kbMetaBase();
+	if (el('askSearch')) el('askSearch').disabled = true;
+	askModalOpen(true);
+	askBusy = true;
+	let d;
+	try { d = await api.ask_help(text) } catch (e) { d = { ok: false, error: (e && e.message) ? e.message : String(e) } }
+	askBusy = false;
+	if (el('askSearch')) el('askSearch').disabled = false;
+	if (!d || !d.ok) {
+		if (box) { box.className = 'kb-answer err'; box.textContent = '没能回答：' + ((d && d.error) || '未知错误') }
+		return
+	}
+	let r = d.result || {};
+	if (box) { box.className = 'kb-answer'; box.textContent = r.answer || '（模型没有给出内容）' }
+	if (meta) meta.textContent = kbMetaLine(r)
+}
+/* V2.4：环境变量里的 Key 被改坏时，用配置文件里的 DPAPI 备份恢复 */
+async function restoreKeyBackup() {
+	let api = native();
+	if (!api || typeof api.restore_key_backup !== 'function') { toast('仅桌面版可用', true); return }
+	try {
+		let d = await api.restore_key_backup();
+		if (!d || !d.ok) throw Error((d && d.error) || '恢复失败');
+		let c = d.result || {};
+		applySettingsState(c);
+		if (el('keyStatus')) el('keyStatus').textContent = '已用本机备份恢复：' + (c.apiKeyMasked || '');
+		toast('已用本机备份恢复 Key（尾号 ' + String(c.apiKeyMasked || '').slice(-4) + '），AI 分析可以用了');
+	} catch (e) { toast('恢复失败：' + ((e && e.message) || e), true) }
 }
 function applySettingsState(c) {
 	if (!c) return;
 	llmReady = !!c.apiKeyMasked;
 	hideNotice = !!c.hideNotice;
 	if (el('showNotice')) el('showNotice').checked = !hideNotice;
+	if (el('restoreKey')) el('restoreKey').hidden = !c.keyBackup;
 	syncQa(); syncNotice(); syncKb()
 }
 function qaSubmit() {
@@ -328,10 +372,16 @@ function qaSubmit() {
 		infoDone('要使用自动问答，请先到「设置」中配置 LLM KEY（设置 → 模型设置里填好 Key 并保存）', true);
 		return
 	}
-	if (!text) { toast('先输入一句想找什么，例如「哪些安装包很久没动了」'); q.focus(); return }
+	if (!text) { toast('先输入一句想知道的，例如「怎么把某个包永久保留」'); q.focus(); return }
+	q.value = '';
+	askFromHeader(text)
+}
+/* 老行为保留：把这句当成关键词交给「智能搜索」去过滤表格（问答框里点「用这句搜表格」走这里） */
+function qaSearch(text) {
+	let m = el('askModal'); if (m) m.classList.remove('open');
+	if (!text) return;
 	el('q').value = text; el('searchStatus').textContent = '';
 	searchVersion++; naturalPaths = null;
-	q.value = '';
 	smartSearch()
 }
 function pad2(n) { return (n < 10 ? '0' : '') + n }
@@ -434,8 +484,9 @@ async function openSettings(pane){
  el('baseUrl').value=c.baseUrl||'';el('model').value=c.model||'';el('autoAnalyze').checked=!!c.autoAnalyze;el('scanAI').checked=!!c.scanAI;el('apiKey').value='';
  if(el('showNotice'))el('showNotice').checked=!c.hideNotice;
  applySettingsState(c);
- let src=c.keySource==='env'?'（来自环境变量 '+c.keyName+'）':(c.keySource==='file'?'（存在本机配置文件里，建议改成环境变量）':'');
+ let src=c.keySource==='env'?'（来自环境变量 '+c.keyName+'）':(c.keySource==='file'?'（用的是本机加密备份里的 Key）':'');
  let s=c.apiKeyMasked?('已配置：'+c.apiKeyMasked+src):'尚未配置';
+ if(c.keyBackup&&c.apiKeyBackupMasked&&c.apiKeyBackupMasked!==c.apiKeyMasked)s+='　本机备份：'+c.apiKeyBackupMasked+'（环境变量坏了可点「用备份恢复」）';
  if(c.keyFormatProblem){s+='　⚠️ '+c.keyFormatProblem;el('keyStatus').style.color='var(--danger-fg)'}
  else el('keyStatus').style.color='var(--fg-faint)';
  el('keyStatus').textContent=s;
@@ -511,6 +562,11 @@ el('showNotice').onchange=()=>{hideNotice=!el('showNotice').checked;syncNotice()
 el('qa').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();qaSubmit()}else if(e.key==='Escape'){e.preventDefault();el('qa').value='';el('qa').blur()}};
 el('qa').onfocus=()=>{if(!llmReady)toast('要使用自动问答，请先到「设置」中配置 LLM KEY',true)};
 el('kbAsk').onclick=askKb;
+el('askClose').onclick=()=>askModalOpen(false);
+el('askAgain').onclick=()=>{askModalOpen(false);if(el('qa'))el('qa').focus()};
+el('askSearch').onclick=()=>qaSearch((askQuestion||'').trim());
+el('askModal').onclick=e=>{if(e.target===el('askModal'))askModalOpen(false)};
+el('restoreKey').onclick=restoreKeyBackup;
 el('kbQ').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();askKb()}else if(e.key==='Escape'){e.preventDefault();el('kbQ').value='';el('kbQ').blur()}};
 el('kbQ').onfocus=()=>{if(!llmReady)toast('要使用功能问答，请先到「设置 → 模型设置」中配置 LLM KEY',true)};
 syncKb();
@@ -792,7 +848,7 @@ function initTheme(){
 }
 el('body').addEventListener('contextmenu',ev=>{let tr=ev.target.closest('tr[data-path]');if(!tr)return;ev.preventDefault();openCtx(ev,tr)});
 document.addEventListener('click',ev=>{if(!ev.target.closest('#ctxMenu'))closeCtx()});
-document.addEventListener('keydown',ev=>{if(ev.key!=='Escape')return;if(el('confirmModal').classList.contains('open'))return;closeCtx();el('settingsModal').classList.remove('open');el('moveModal').classList.remove('open')});
+document.addEventListener('keydown',ev=>{if(ev.key!=='Escape')return;if(el('confirmModal').classList.contains('open'))return;closeCtx();el('settingsModal').classList.remove('open');el('moveModal').classList.remove('open');el('askModal').classList.remove('open')});
 window.addEventListener('blur',closeCtx);
 el('aiAnalyze').onclick=e=>aiAnalyze(!!(e&&e.shiftKey));
 el('keep').onclick=()=>action('keep');

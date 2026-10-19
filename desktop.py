@@ -52,6 +52,10 @@ class Api:
  def save_settings(self, data):
   try: return {'ok':True,'result':server.save_settings(data)}
   except Exception as e: return {'ok':False,'error':str(e)}
+ def restore_key_backup(self):
+  """V2.4：用配置文件里 DPAPI 加密的备份，把 Key 写回用户环境变量。"""
+  try: return {'ok':True,'result':server.restore_key_backup()}
+  except Exception as e: return {'ok':False,'error':str(e)}
  def test_connection(self, data=None):
   try:
    data=data or {}
