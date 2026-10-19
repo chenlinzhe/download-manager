@@ -23,7 +23,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='下载包管家智能搜索版-v24',
+    name='下载包管家智能搜索版-v25',
     icon='app.ico',
     version='version_info.txt',
     debug=False,

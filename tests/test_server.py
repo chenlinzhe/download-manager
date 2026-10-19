@@ -365,7 +365,7 @@ class TestLlmError(unittest.TestCase):
 
 
 class TestNotes(TempApp):
-    """备注：点击 AI 说明那一格写的文字要能存下来并参与搜索。"""
+    """这一格的说明：用户在 AI 原话上改 / 补的文字要能存下来、参与搜索，且不动 AI 说明本身。"""
 
     def test_save_and_reload(self):
         path = 'D:\\Downloads\\tool.zip'
@@ -380,7 +380,7 @@ class TestNotes(TempApp):
         self.assertNotIn(path, server.load_notes())
 
     def test_length_capped(self):
-        self.assertEqual(len(server.save_note('p', u'长' * 500)['note']), 200)
+        self.assertEqual(len(server.save_note('p', u'长' * 500)['note']), 400)
 
     def test_missing_path_rejected(self):
         with self.assertRaises(ValueError):
@@ -396,6 +396,24 @@ class TestNotes(TempApp):
     def test_note_used_by_search_text(self):
         item = server._search_text({'name': 'x.zip', 'note': u'装机必备'})
         self.assertIn(u'装机必备', item)
+
+    def test_note_does_not_touch_ai_summary(self):
+        """改了说明不该动 AI 原话本身（界面上 AI 原话还要能展开对照）。"""
+        path = 'D:\\Downloads\\setup.exe'
+        server.save_note(path, u'这是佳能打印机的驱动安装包，别删')
+        data = {'items': [{'path': path, 'aiDescription': {'summary': u'某个安装程序', 'searchedAt': '2026-01-01T00:00:00', 'model': 'deepseek-flash'}}]}
+        merged = server._with_notes(data)
+        self.assertEqual(merged['items'][0]['note'], u'这是佳能打印机的驱动安装包，别删')
+        self.assertEqual(merged['items'][0]['aiDescription']['summary'], u'某个安装程序')
+
+    def test_note_survives_reload(self):
+        """写完再读（相当于重新扫描）仍然是用户的版本。"""
+        path = 'D:\\Downloads\\x.msi'
+        server.save_note(path, u'公司 VPN 客户端，IT 让留着')
+        server.save_note('D:\\Downloads\\y.zip', u'可删')
+        notes = server.load_notes()
+        self.assertEqual(notes[path], u'公司 VPN 客户端，IT 让留着')
+        self.assertEqual(notes['D:\\Downloads\\y.zip'], u'可删')
 
 
 class TestKeyFormat(unittest.TestCase):

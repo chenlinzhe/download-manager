@@ -10,7 +10,7 @@ if getattr(__import__('sys'),'frozen',False):
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
 GROUPS_FILE=APP/'resource_groups.json'
-APP_VERSION='2.4'
+APP_VERSION='2.5'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -890,10 +890,11 @@ def load_notes():
  except (OSError,json.JSONDecodeError): return {}
 
 def save_note(path, text):
- """保存用户自己写的备注（按包路径存，最多 200 字；留空即删除）。"""
+ """保存用户改过 / 补过的说明（按包路径存，最多 400 字；留空即删除，等于恢复 AI 原话）。
+ 这一格显示的就是它：用户在 AI 原话上改，改完以用户的版本为准，AI 原话另存于 aiDescription 里供对照。"""
  notes=load_notes(); key=str(path or '')
  if not key: raise ValueError('缺少包路径')
- note=' '.join(str(text or '').split())[:200]
+ note=' '.join(str(text or '').split())[:400]
  if note: notes[key]=note
  else: notes.pop(key,None)
  tmp=NOTES_FILE.with_suffix('.tmp')

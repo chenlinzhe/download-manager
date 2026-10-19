@@ -165,6 +165,8 @@ td.llm{min-width:300px;max-width:400px;cursor:text}
 .mynote{margin-top:5px;padding:2px 8px;background:var(--warn-bg);border-radius:var(--radius-sm);color:var(--warn-fg);font-size:12px}
 .note-hint{margin-top:5px;font-size:11px;color:var(--fg-faint)}
 .note-edit{width:100%;font:inherit;font-size:13px;border:1px solid var(--accent);border-radius:var(--radius-sm);padding:5px 8px;background:var(--surface);color:var(--fg);resize:none}
+.ai.mine{background:var(--warn-bg);color:var(--warn-fg)}
+.ai-orig-box{margin-top:4px;background:var(--surface-2);color:var(--fg-muted);border:1px dashed var(--border-strong)}
 .modal{display:none;position:fixed;inset:0;z-index:60;background:rgba(17,24,39,.45);align-items:center;justify-content:center;padding:20px}
 html.dark .modal{background:rgba(0,0,0,.66)}
 .modal.open{display:flex}
@@ -232,7 +234,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </head>
 <body>
 <header>
- <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V2.4</span></div>
+ <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V2.5</span></div>
  <div class="qa-wrap"><input id="qa" class="qa-input" type="search" autocomplete="off" spellcheck="false" placeholder="自动问答：问一句，Enter 提交" title="要使用自动问答，请先到「设置」中配置 LLM KEY" aria-label="自动问答"></div>
  <div class="header-right">
   <span id="status">准备加载…</span>
@@ -241,7 +243,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
  </div>
 </header>
 <main>
- <div id="notice" class="notice"><span class="notice-icon">&#9432;</span><span class="notice-text">扫描分两种：平时打开软件，7 天内的结果直接复用（目录清单一旦有增删，会自动重扫一遍，不会给你旧列表）；想立刻看最新的就点「重新扫描」。扫描全程只读文件名 / 大小 / 时间，纯本地，不联网。AI 不参与扫描，只有你自己点「AI 分析」「智能搜索」时才会请求 DeepSeek。点「标为保留」＝该包永久留用，不受清理建议影响；徽章旁的小 ✕ 可以随时取消保留，也可以勾选后点工具栏的「取消保留」。表格上方那一排「资源标签」默认只有一个「下载包」（自动发现的下载目录 + 你手工加的目录）；想用来管别的资料（比如自己的项目），就点「＋ 新建标签」再建一个，功能跟「下载包」完全一样，只是目录由你自己加。右键任意一行还有 AI 分析 / 写备注 / 忽略 / 转移 / 删到回收站。程序不会运行任何安装包。</span><button type="button" id="noticeClose" class="notice-close" title="关闭这条提示，之后不再自动显示（想恢复：设置 → 外观与主题 → 勾「启动时显示顶部提示条」）" aria-label="关闭提示">&#10005;</button></div>
+ <div id="notice" class="notice"><span class="notice-icon">&#9432;</span><span class="notice-text">扫描分两种：平时打开软件，7 天内的结果直接复用（目录清单一旦有增删，会自动重扫一遍，不会给你旧列表）；想立刻看最新的就点「重新扫描」。扫描全程只读文件名 / 大小 / 时间，纯本地，不联网。AI 不参与扫描，只有你自己点「AI 分析」「智能搜索」时才会请求 DeepSeek。点「标为保留」＝该包永久留用，不受清理建议影响；徽章旁的小 ✕ 可以随时取消保留，也可以勾选后点工具栏的「取消保留」。表格上方那一排「资源标签」默认只有一个「下载包」（自动发现的下载目录 + 你手工加的目录）；想用来管别的资料（比如自己的项目），就点「＋ 新建标签」再建一个，功能跟「下载包」完全一样，只是目录由你自己加。右键任意一行还有 AI 分析 / 改这一格的说明 / 忽略 / 转移 / 删到回收站。程序不会运行任何安装包。</span><button type="button" id="noticeClose" class="notice-close" title="关闭这条提示，之后不再自动显示（想恢复：设置 → 外观与主题 → 勾「启动时显示顶部提示条」）" aria-label="关闭提示">&#10005;</button></div>
  <div id="tagBar" class="tag-bar" hidden></div>
  <section class="summary">
   <div class="card"><span class="k">扫描到的项目</span><b id="count">&mdash;</b></div>
@@ -291,7 +293,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    <thead><tr>
     <th style="width:36px"><input type="checkbox" id="all" aria-label="全选"></th>
     <th class="sortable" data-sort="name">包 / 路径</th>
-    <th class="sortable" data-sort="ai" title="AI 说明：勾选这一行后点工具栏的「AI 分析」，DeepSeek 会用一句话讲清这是什么包。没分析过显示「--」；这一格同时显示你写的备注，点格子就能写 / 改备注。不点「AI 分析」就不会联网。">AI 说明：这是个什么包</th>
+    <th class="sortable" data-sort="ai" title="AI 说明：勾选这一行后点工具栏的「AI 分析」，DeepSeek 会用一句话讲清这是什么包，没分析过显示「--」。AI 说得不准、或不完整？直接点这一格就能在它的原话上改，或者接着补充——改完这一格显示的就是你的版本，AI 原话紧跟在下面、标着「AI 原话：」，一眼就能对照。不点「AI 分析」就不会联网。">AI 说明：这是个什么包</th>
     <th class="sortable" data-sort="rec">建议</th>
     <th class="sortable" data-sort="score">价值分</th>
     <th class="sortable" data-sort="size" title="大小与文件数不含 node_modules、.git、venv 这类依赖与缓存目录（只按一个目录算，不逐个文件数），所以大项目也会很快扫完">大小</th>
@@ -312,7 +314,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    <button type="button" class="nav-item" data-pane="ignore" title="查看并撤销被忽略的项目名字">忽略名单</button>
    <button type="button" class="nav-item" data-pane="theme" title="跟随系统 / 浅色 / 深色">外观与主题</button>
    <button type="button" class="nav-item" data-pane="guide" title="逐条说明软件里的每个功能：扫描、建议、AI 分析、批量操作、设置">功能说明</button>
-   <div class="nav-foot">下载包管家 V2.4<br>程序不会运行任何安装包</div>
+   <div class="nav-foot">下载包管家 V2.5<br>程序不会运行任何安装包</div>
   </nav>
   <section class="settings-body">
    <div class="pane" data-pane="model">
@@ -396,7 +398,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
       <li><b>「下载包」里是什么</b>：自动发现的下载目录（各磁盘上名字含 download / 下载 的文件夹），加上你在目录下拉里手工添加的目录。</li>
       <li><b>新建自己的标签</b>：点标签条右边的「＋ 新建标签」，输入名字（最多 12 字），比如「我的项目」，回车就建好，页面会自动切到这个新标签。</li>
       <li><b>每个标签的目录自己加</b>：切到某个标签后，在工具栏的目录下拉里选「＋ 新增目录（可多选）…」，选中的目录就加到这个标签下面（一次可以选好几个）；第一个标签「下载包」加目录的方式跟以前一样。一个目录只归一个标签，重复选会自动跳过。</li>
-      <li><b>功能完全一样</b>：每个标签都能扫描、看顶部四张卡片、按目录筛选、智能搜索、AI 分析、标为保留 / 忽略 / 转移 / 移到回收站、写备注，用法一模一样，区别只是看的是这一组目录。</li>
+      <li><b>功能完全一样</b>：每个标签都能扫描、看顶部四张卡片、按目录筛选、智能搜索、AI 分析、标为保留 / 忽略 / 转移 / 移到回收站、改这一格的说明，用法一模一样，区别只是看的是这一组目录。</li>
       <li><b>改名或切走</b>：除「下载包」外，标签右侧的 ✎ 可以改名（Enter 保存、Esc 放弃）；点标签本身就切换视图，四张卡片和表格都只算当前标签里的项目。</li>
       <li><b>标签只换视角</b>：新建 / 改名标签不会动任何文件，也不改变清理建议的算法；想让某个项目彻底不参与清理，就勾上再「标为保留」或右键「忽略」。标签存在本机 resource_groups.json。</li>
      </ul>
@@ -411,7 +413,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
      <ul>
       <li><b>勾选框</b>：勾上后才能用右侧按钮批量操作；表头那个勾是全选 / 全不选。</li>
       <li><b>包 / 路径</b>：名称、所在目录（点一下直接在资源管理器里打开）、类型和文件数；本次扫描新出现的项目带「新增」徽章。</li>
-      <li><b>AI 说明：这是个什么包</b>：DeepSeek 生成的一句话说明，后面用小字标「多久前分析的」；这一格同时显示你写的备注，点格子就能写 / 改备注。</li>
+      <li><b>AI 说明：这是个什么包</b>：DeepSeek 生成的一句话说明，后面用小字标「多久前分析的」。<b>AI 说得不准或不完整，直接点这一格就能改</b>：格子里预填的就是现在显示的那句话，你在原话上修改或接着补充，回车保存后<b>你的版本显示在上面</b>，AI 原话紧跟在下面并标着「AI 原话：」，两边一眼就能对照。</li>
       <li><b>建议</b>：保留（手工）／建议保留／待确认／不用保住。手工保留的徽章旁带一个小 ✕，点它就能取消保留。</li>
       <li><b>价值分</b>：0 到 100 的留用价值，越低越该清理（38 分以下为「不用保住」，65 分以上为「建议保留」）。</li>
       <li><b>大小</b>、<b>时间</b>：体积与最近修改日期，下面小字是「多少天前」。</li>
@@ -429,11 +431,11 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
       <li><b>会告诉你多久前分析过</b>：左侧信息条会写「这 N 项 X 分钟前分析过，文件没变，不用再分析」；每个单元格里也有「X 分钟前」的小字，鼠标悬停能看到具体时间和所用的模型。</li>
       <li><b>想重做</b>：按住 <kbd>Shift</kbd> 点「AI 分析」会忽略缓存重新问一遍；右键菜单里的「AI 分析」同样是强制重做。文件本身变了（大小或修改时间不同）会自动当成新包重新分析，不需要强制。</li>
       <li><b>不会自己乱跑</b>：只有你点「AI 分析」「立即 AI 分析」「智能搜索」，或者打开了「启动时自动分析」时才会调用接口；那个开关默认是关的。<b>扫描本身不调用 AI</b>——判断「这个目录是不是多个包的集合」默认走本地规则 + 以前缓存的结论；想在扫描时也让 AI 判断，去设置里勾「扫描时用 AI 判断目录是否该展开」（默认关闭）。</li>
-      <li><b>没有 Key 也能用</b>：没配置 Key 时「AI 说明」列显示「--」，其余功能（清理建议、保留、转移、回收站、备注）照常工作。</li>
+      <li><b>没有 Key 也能用</b>：没配置 Key 时「AI 说明」列显示「--」，其余功能（清理建议、保留、转移、回收站、改说明）照常工作。</li>
      </ul>
      <h3>六、智能搜索</h3>
      <ul>
-      <li><b>关键词过滤</b>：在搜索框里直接输入就实时过滤，名称、路径、类型、AI 说明、备注都参与匹配。</li>
+      <li><b>关键词过滤</b>：在搜索框里直接输入就实时过滤，名称、路径、类型、AI 说明、你的说明都参与匹配。</li>
       <li><b>自然语言搜索</b>：输入一整句，比如「上次那个装 CUDA 的安装包」，按 Enter 或点「智能搜索」，会先用关键词在本地匹配，再让 DeepSeek 把这句话扩成语义相近的条件；搜索框旁的提示会说明这次是「关键词 + AI 语义」还是「只有关键词」。</li>
       <li><b>清空搜索</b>：把搜索框清空就回到完整列表。</li>
      </ul>
@@ -447,18 +449,21 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
      </ul>
      <h3>八、左侧信息条</h3>
      <ul>
-      <li>工具栏左边固定显示「已选 N 项」，后面的信息条会实时播报：加载与重新扫描的进度和结果、AI 分析进行到哪一步，以及保留、取消保留、忽略、转移、移到回收站、备注保存的结果。</li>
+      <li>工具栏左边固定显示「已选 N 项」，后面的信息条会实时播报：加载与重新扫描的进度和结果、AI 分析进行到哪一步，以及保留、取消保留、忽略、转移、移到回收站、说明保存的结果。</li>
       <li>带跳动圆点表示正在忙，静态圆点表示已完成，红色表示出错（例如 AI 调用失败的原因会直接写在这里）。</li>
      </ul>
-     <h3>九、备注</h3>
+     <h3>九、改掉 AI 的说明（你说了算）</h3>
      <ul>
-      <li>点「AI 说明：这是个什么包」这一格，或右键 →「写 / 改备注」，写一句自己的话（最多 200 字，单行输入，按 Enter 或点别处即保存）。</li>
-      <li>备注存本机 user_notes.json，与 AI 说明互不覆盖；清空后再保存就等于删掉备注。</li>
+      <li><b>为什么要能改</b>：AI 只看文件名、大小、时间和压缩包里的清单，遇到名字含糊的包（比如 <code>setup_v2.exe</code>）可能说错，也可能只说一半。</li>
+      <li><b>怎么改</b>：点「AI 说明：这是个什么包」这一格（或右键 →「改这一格的说明」）。格子里<b>已经预填了现在显示的那句话</b>：错的地方直接删改，不完整就在后面接着写，按 Enter 或点别处保存，Esc 放弃。</li>
+      <li><b>改完是什么样</b>：这一格上面是「我的说明：你写的话」，下面紧跟一行小字「AI 原话：…」（带生成时间），两个排在一起，哪句是你的、哪句是 AI 的一目了然。</li>
+      <li><b>想恢复 AI 的说法</b>：再点这一格，把内容清空后回车即可；改回与 AI 原话一模一样的文字也会自动恢复。</li>
+      <li>最多 400 字（单行）。你的版本存在本机 <code>user_notes.json</code>，随扫描一直保留，也会被搜索框匹配到；重新做 AI 分析不会覆盖你改过的版本。</li>
      </ul>
      <h3>十、右键菜单</h3>
      <ul>
-      <li>任意一行右键可选：AI 分析（强制重做）、写 / 改备注、标为保留、取消保留、忽略、打开所在目录、转移到其他目录、移到回收站。</li>
-      <li>多选后右键，菜单里会显示「N 项」，除备注和打开目录（只能单行用）之外都可以批量操作。</li>
+      <li>任意一行右键可选：AI 分析（强制重做）、改这一格的说明、标为保留、取消保留、忽略、打开所在目录、转移到其他目录、移到回收站。</li>
+      <li>多选后右键，菜单里会显示「N 项」，除「改说明」和「打开目录」（只能单行用）之外都可以批量操作。</li>
      </ul>
      <h3>十一、设置里另外三页</h3>
      <ul>
@@ -490,7 +495,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
      </ul>
      <h3>十五、数据与安全</h3>
      <ul>
-      <li>所有数据都在本机：扫描快照、AI 说明缓存、备注、忽略名单、保留标记、设置文件。</li>
+      <li>所有数据都在本机：扫描快照、AI 说明缓存、你改过的说明、忽略名单、保留标记、设置文件。</li>
       <li>软件不运行、不解压、不上传你的任何文件；唯一的外发内容是你主动触发的 AI 分析请求（包名 + 可选的文件清单）和智能搜索的那一句话。</li>
       <li>删除只走 Windows 回收站，转移只是普通的文件移动，都不会静默覆盖同名文件。</li>
      </ul>
@@ -546,6 +551,6 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="ctxMenu" class="ctx-menu"></div>
-<script src="app.js?v=20260820-34"></script>
+<script src="app.js?v=20260820-35"></script>
 </body>
 </html>
