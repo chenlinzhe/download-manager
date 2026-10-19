@@ -229,6 +229,43 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 .ignore-row .ignore-meta{color:var(--fg-faint);font-size:12px;line-height:1.6;word-break:break-all}
 .ignore-row .ignore-note{color:var(--fg-muted);font-size:12px;line-height:1.6;margin-top:2px;white-space:pre-line}
 .seg-count{color:var(--fg-faint);font-weight:400}
+/* V3.0：模型中心（多个常用模型，按服务商分组、可搜索） */
+.model-top{display:flex;gap:8px;align-items:center;margin:12px 0 8px}
+.model-search{flex:1 1 auto;min-width:0}
+.model-status{font-size:12px;line-height:1.6;min-height:0;margin-bottom:8px}
+.model-status.err{color:var(--danger-fg)}
+.model-status.ok{color:var(--ok-fg)}
+.model-list{max-height:calc(86vh - 268px);min-height:140px;overflow:auto;display:grid;gap:6px;align-content:start;padding-right:2px}
+.model-group{display:grid;gap:6px}
+.model-group-head{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--fg-faint);margin:8px 0 0}
+.model-group:first-child .model-group-head{margin-top:0}
+.model-card{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);padding:9px 11px}
+.model-card.current{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:var(--accent-soft)}
+.model-card .model-main{flex:1 1 auto;min-width:0;display:grid;gap:2px}
+.model-card .model-name{display:flex;align-items:center;gap:6px;font-size:13.5px;font-weight:600;color:var(--fg);min-width:0}
+.model-card .model-name .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.model-dot{width:8px;height:8px;border-radius:50%;background:var(--border-strong);flex:0 0 auto;box-shadow:0 0 0 1px var(--border-strong)}
+.model-dot.on{background:var(--ok-fg);box-shadow:0 0 0 1px var(--ok-fg)}
+.model-badge{font-size:11px;font-weight:600;line-height:1.5;border-radius:999px;padding:0 7px;background:var(--accent-soft);color:var(--accent);border:1px solid currentColor;white-space:nowrap;flex:0 0 auto}
+.model-badge.mute{background:transparent;color:var(--fg-faint);border-color:var(--border-strong)}
+html.dark .model-badge{background:var(--surface)}
+.model-card .model-meta{font-size:12px;color:var(--fg-faint);line-height:1.6;word-break:break-all}
+.model-card .model-acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex:0 0 auto}
+.model-empty{color:var(--fg-faint);font-size:13px;line-height:1.7;padding:14px 2px;white-space:pre-line}
+.model-opts{margin:14px 0 0;border-top:1px solid var(--border);padding-top:10px}
+.model-opts>summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--fg-faint)}
+.model-opts[open]>summary{margin-bottom:8px}
+.model-opts .chk{display:flex;white-space:normal;align-items:flex-start;line-height:1.6;margin:6px 0}
+.model-opts .chk input{margin-top:2px;flex:0 0 auto}
+.model-opts .dialog-actions{margin-top:10px}
+.model-dialog{width:min(620px,94vw)}
+.dialog-head{display:flex;align-items:flex-start;gap:10px;justify-content:space-between}
+button.dialog-x{border:0;background:transparent;color:var(--fg-faint);font-size:13px;line-height:1;padding:4px 6px;border-radius:var(--radius-sm)}
+button.dialog-x:hover:not(:disabled){background:var(--surface-2);color:var(--fg)}
+button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
+.model-verify{flex:1 1 auto;min-width:0;font-size:12px;line-height:1.6}
+.model-verify.ok{color:var(--ok-fg)}
+.model-verify.err{color:var(--danger-fg)}
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:999px;border:2px solid transparent;background-clip:content-box}
@@ -315,7 +352,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
  <div class="dialog dialog-wide settings">
   <nav class="settings-nav" aria-label="设置分类">
    <div class="settings-title">设置</div>
-   <button type="button" class="nav-item active" data-pane="model" title="DeepSeek 的 API Key、API 地址与模型">模型设置</button>
+   <button type="button" class="nav-item active" data-pane="model" title="常用模型都在这里：按服务商分组、可搜索；每个模型单独保存，点「设置为默认」才切换默认">模型设置</button>
    <button type="button" class="nav-item" data-pane="ignore" title="搜索目录 / AI 分析 两个标签：查看并撤销被忽略的项目，以及被 AI 分析跳过的那几格">忽略名单</button>
    <button type="button" class="nav-item" data-pane="theme" title="跟随系统 / 浅色 / 深色">外观与主题</button>
    <button type="button" class="nav-item" data-pane="guide" title="逐条说明软件里的每个功能：扫描、建议、AI 分析、批量操作、设置">功能说明</button>
@@ -324,36 +361,24 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
   <section class="settings-body">
    <div class="pane" data-pane="model">
     <h2>模型设置</h2>
-    <p class="hint">AI 说明与智能搜索的语义扩展都由 DeepSeek 提供，仅作整理参考；未配置 Key 时表格显示「--」，其余功能（包括扫描）不受影响。扫描默认完全本地，不花额度。</p>
-    <div class="field">
-     <label for="apiKey">DeepSeek API Key</label>
-     <div class="row-inline">
-      <input id="apiKey" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false" placeholder="留空表示不更换">
-      <button type="button" id="restoreKey" hidden title="用配置文件里 DPAPI 加密的备份，把 Key 重新写回用户环境变量（环境变量被清掉或写坏时用）">用备份恢复 Key</button>
-     </div>
-     <small id="keyStatus" class="muted"></small>
-     <small class="muted">Key 存在本机用户环境变量 DEEPSEEK_API_KEY 里，另在配置文件留一份只有本机当前用户能解密的备份（DPAPI）——明文永远不落盘、不进 Git；万一环境变量被清掉或填错，点「用备份恢复 Key」就能回到上一次保存的那把。</small>
+    <p class="hint">AI 说明、智能搜索和功能问答都用这里的「默认模型」。可以放多个常用模型：改哪个存哪个，保存不会动默认；想让某个模型马上生效，就点它旁边的「设为默认」。没配 Key 时表格显示「--」，扫描、清理建议这些本地功能照常用。</p>
+    <div class="model-top">
+     <input id="modelSearch" class="model-search" type="search" autocomplete="off" spellcheck="false" placeholder="搜索：模型名 / 服务商 / 型号 / 地址" title="按名称、服务商、型号、接口地址过滤下面的模型；分组标题也会一起过滤" aria-label="搜索模型">
+     <button type="button" id="modelAdd" title="新增一个常用模型：先在弹窗里选服务商（可搜索），再填型号和 Key，最后决定是「保存」还是「设为默认」">＋ 添加模型</button>
     </div>
-    <div class="field">
-     <label for="baseUrl">API 地址</label>
-     <input id="baseUrl" value="https://api.deepseek.com">
-    </div>
-    <div class="field">
-     <label for="model">模型</label>
-     <input id="model" value="deepseek-flash">
-    </div>
-    <div class="field">
-     <button id="testConn" title="用当前填写的 Key 与模型向 DeepSeek 发一次请求，验证能不能连通">测试连接</button>
-     <small id="testResult" class="muted"></small>
-    </div>
-    <label class="chk" title="默认关闭：只有勾上才会在软件启动时自动分析缺少 AI 说明的项目；不勾就只在你自己点「AI 分析」/「立即 AI 分析」时才跑"><input id="autoAnalyze" type="checkbox"> 启动时自动分析缺少说明的项目（默认关闭）</label>
-    <label class="chk" title="默认关闭：关闭时扫描纯本地、不联网；打开后扫描时会额外让 DeepSeek 判断哪些一级目录是「多个独立下载包的集合」（要联网、会消耗额度，目录多的扫描会变慢）"><input id="scanAI" type="checkbox"> 扫描时用 AI 判断目录是否该展开（默认关闭，关着扫描不联网）</label>
+    <div id="modelStatus" class="model-status muted" aria-live="polite"></div>
+    <div id="modelList" class="model-list"><div class="model-empty">正在读取模型配置…</div></div>
+    <details class="model-opts">
+     <summary>其他选项（跟模型配置无关，点开才有）</summary>
+     <label class="chk" title="默认关闭：只有勾上才会在软件启动时自动分析缺少 AI 说明的项目；不勾就只在你自己点「AI 分析」/「立即 AI 分析」时才跑"><input id="autoAnalyze" type="checkbox"> 启动时自动分析缺少说明的项目（默认关闭）</label>
+     <label class="chk" title="默认关闭：关闭时扫描纯本地、不联网；打开后扫描时会额外让默认模型判断哪些一级目录是「多个独立下载包的集合」（要联网、会消耗额度，目录多的扫描会变慢）"><input id="scanAI" type="checkbox"> 扫描时用 AI 判断目录是否该展开（默认关闭，关着扫描不联网）</label>
+     <div class="dialog-actions"><span class="spacer"></span><button type="button" id="settingsSaveOptions" title="只保存这两个开关，不会改动任何模型配置、也不会联网">保存这两个开关</button></div>
+    </details>
     <div class="dialog-actions">
-     <button id="clearKey" class="danger" title="删除本机环境变量 DEEPSEEK_API_KEY 与配置文件里的残留">清除 Key</button>
+     <button type="button" id="restoreKey" hidden title="用配置文件里 DPAPI 加密的备份，把 Key 重新写回用户环境变量（环境变量被清掉或写坏时用）">用备份恢复 Key</button>
      <span class="spacer"></span>
-     <button id="settingsCancel">取消</button>
-     <button id="settingsAnalyze" title="先保存当前填写的内容，再对还没有 AI 说明的项目跑一遍分析">立即 AI 分析</button>
-     <button id="settingsSave" class="primary" title="保存 API Key、API 地址、模型与自动分析开关">保存</button>
+     <button type="button" id="settingsAnalyze" title="用当前默认模型，对还没有 AI 说明的项目跑一遍分析（不改任何配置）">立即 AI 分析</button>
+     <button type="button" data-close-settings class="primary" title="关闭设置窗口（没有单独的外层保存按钮：模型的保存都在各自的弹窗里）">完成</button>
     </div>
    </div>
    <div class="pane" data-pane="ignore" hidden>
@@ -508,6 +533,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
      <h3>十五、数据与安全</h3>
      <ul>
       <li>所有数据都在本机：扫描快照、AI 说明缓存、你改过的说明、忽略名单、保留标记、设置文件。</li>
+      <li><b>模型配置怎么存</b>：常用模型放在本机的 models.json 里，列表和「当前默认」分开存、用内部 ID 对应；每个模型各自存自己的服务商、接口地址、型号、接口类型与 Key。Key 用 Windows 的 DPAPI 加密后保存（只有本机当前用户能解开），界面上永远只显示尾号，模型配置文件里不会出现明文 Key。</li>
       <li>软件不运行、不解压、不上传你的任何文件；唯一的外发内容是你主动触发的 AI 分析请求（包名 + 可选的文件清单）和智能搜索的那一句话。</li>
       <li>删除只走 Windows 回收站，转移只是普通的文件移动，都不会静默覆盖同名文件。</li>
      </ul>
@@ -515,6 +541,64 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
     <div class="dialog-actions"><span class="spacer"></span><button type="button" data-close-settings class="primary">完成</button></div>
    </div>
   </section>
+ </div>
+</div>
+<div id="modelModal" class="modal">
+ <div class="dialog model-dialog" role="dialog" aria-modal="true" aria-labelledby="modelTitle">
+  <div class="dialog-head">
+   <h2 id="modelTitle">模型</h2>
+   <button type="button" id="modelClose" class="dialog-x" title="关闭这个窗口，不保存这次的改动" aria-label="关闭">&#10005;</button>
+  </div>
+  <p class="hint">每个模型单独保存。「保存」只存这一个模型、默认模型不变；「设置为默认」会把这上面最新填写的内容一起存下来，并马上切成默认（AI 分析、智能搜索立刻用它）。改字段、刷新列表都不会自己保存，也不会自己联网。</p>
+  <div class="field">
+   <label for="mName">名称（给自己看的）</label>
+   <input id="mName" autocomplete="off" spellcheck="false" placeholder="例如：DeepSeek 主力 / 便宜的 GLM">
+   <small class="muted">名字旁边的圆点＝必要字段齐不齐：<b>绿色</b>表示服务商、接口地址、型号、Key 都填好了；灰色表示跑不起来。</small>
+  </div>
+  <div class="field">
+   <label for="mProvider">服务商</label>
+   <select id="mProvider" title="先选服务商：接口地址和默认接口类型会按预置自动填好；选「自定义」就自己填地址"></select>
+   <small class="muted" id="mProviderHint"></small>
+  </div>
+  <div class="field">
+   <label for="mBaseUrl">接口地址（Base URL）</label>
+   <input id="mBaseUrl" autocomplete="off" spellcheck="false" placeholder="https://api.deepseek.com">
+   <small class="muted">只写服务商给的地址前缀，程序会按接口类型补上 /chat/completions、/responses 或 /messages。</small>
+  </div>
+  <div class="field">
+   <label for="mModel">模型型号</label>
+   <input id="mModel" list="mModelOptions" autocomplete="off" spellcheck="false" placeholder="例如 deepseek-flash">
+   <datalist id="mModelOptions"></datalist>
+   <small class="muted">可以从预置型号里挑，也可以直接改成服务商支持的任意型号；改过的型号原样保存，升级不会被预置值覆盖。</small>
+  </div>
+  <div class="field">
+   <label for="mClientType">接口类型</label>
+   <select id="mClientType"></select>
+   <small class="muted" id="mClientTypeHint"></small>
+  </div>
+  <div class="field">
+   <label for="mKey">API Key</label>
+   <div class="row-inline">
+    <input id="mKey" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false" placeholder="留空＝不改动已保存的 Key">
+    <button type="button" id="mKeyShow" title="临时显示 / 隐藏正在填写的 Key；只在这台电脑的内存里，不写任何文件">显示</button>
+   </div>
+   <small class="muted" id="mKeyState"></small>
+   <label class="chk" title="勾上并保存＝把这个模型已保存的 Key 删掉；之后要用得重新填"><input id="mKeyClear" type="checkbox"> 清除这个模型已保存的 Key</label>
+  </div>
+  <div class="field">
+   <div class="row-inline">
+    <button type="button" id="mVerify" title="用上面填的内容（含还没保存的改动）真发一次很小的请求；只测试，不保存、不改默认">验证连接</button>
+    <small id="mVerifyResult" class="muted model-verify" aria-live="polite"></small>
+   </div>
+   <small class="muted">验证结果只显示在这个窗口里；某个模型验证失败不影响其他模型，也不会把这份草稿存下来。</small>
+  </div>
+  <div class="dialog-actions">
+   <button type="button" id="mDelete" class="danger" title="把这个模型从列表里删掉（其他模型不受影响）">删除这个模型</button>
+   <span class="spacer"></span>
+   <button type="button" id="mCancel">取消</button>
+   <button type="button" id="mSave" title="只保存这一个模型到本机；默认模型不变，也不联网">保存</button>
+   <button type="button" id="mSetDefault" class="primary" title="保存这里最新填写的内容，并设为默认模型">设置为默认</button>
+  </div>
  </div>
 </div>
 <div id="moveModal" class="modal">
@@ -563,6 +647,6 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="ctxMenu" class="ctx-menu"></div>
-<script src="app.js?v=20260820-39"></script>
+<script src="app.js?v=20260820-40"></script>
 </body>
 </html>

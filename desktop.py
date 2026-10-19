@@ -52,6 +52,25 @@ class Api:
  def save_settings(self, data):
   try: return {'ok':True,'result':server.save_settings(data)}
   except Exception as e: return {'ok':False,'error':str(e)}
+ def model_catalog(self):
+  """V3.0：预置服务商 / 型号 / 三种接口类型——前端唯一的数据源。"""
+  try: return {'ok':True,'result':server.model_catalog()}
+  except Exception as e: return {'ok':False,'error':str(e)}
+ def get_models(self):
+  """只读：已保存的模型列表 + 当前默认模型（绝不含明文 Key）。"""
+  try: return {'ok':True,'result':server.models_state()}
+  except Exception as e: return {'ok':False,'error':str(e)}
+ def save_model_profile(self, data):
+  """保存当前这一个模型；data.intent 必须是用户点击带来的 user-confirmed。"""
+  try: return {'ok':True,'result':server.save_model_profile(data)}
+  except Exception as e: return {'ok':False,'error':str(e)}
+ def delete_model_profile(self, data):
+  try: return {'ok':True,'result':server.delete_model_profile(data)}
+  except Exception as e: return {'ok':False,'error':str(e)}
+ def verify_model_profile(self, data):
+  """验证连接：只测界面上这份草稿，不保存、不改默认。"""
+  try: return {'ok':True,'result':server.verify_model_profile(data)}
+  except Exception as e: return {'ok':False,'error':str(e)}
  def restore_key_backup(self):
   """V2.4：用配置文件里 DPAPI 加密的备份，把 Key 写回用户环境变量。"""
   try: return {'ok':True,'result':server.restore_key_backup()}

@@ -19,7 +19,7 @@ class TempApp(unittest.TestCase):
         for name in ('SETTINGS_FILE', 'LABELS_FILE', 'SNAPSHOT_FILE', 'INVENTORY_FILE',
                      'AI_CACHE_FILE', 'COLLECTION_CACHE_FILE', 'COLLECTION_FAIL_FILE',
                      'MANUAL_ROOTS_FILE', 'NOTES_FILE', 'IGNORE_FILE', 'GROUPS_FILE',
-                     'AI_HIDDEN_FILE'):
+                     'AI_HIDDEN_FILE', 'MODELS_FILE'):
             self._saved[name] = getattr(server, name)
             setattr(server, name, self.dir / (name.lower() + '.json'))
         self._roots = server.roots
@@ -306,6 +306,333 @@ class TestSettings(TempApp):
         self.assertEqual(server.unprotect_key(token), 'sk-roundtrip')
         self.assertEqual(server.unprotect_key('not-hex'), '')
 
+
+class TestModelProfiles(TempApp):
+    """V3.0：文字模型可以配多个——列表与默认模型分开存、保存不等于切默认、初始化/刷新不写盘。"""
+
+    def setUp(self):
+        super().setUp()
+        self.env = FakeEnv()
+        self._set_env = server.set_user_env_key
+        self._env_key = server.env_api_key
+        server.set_user_env_key = self.env
+        server.env_api_key = lambda: self.env.stored.get(server.ENV_KEY_NAME, '')
+        self._urlopen = urllib.request.urlopen
+        self.sent = []
+
+    def tearDown(self):
+        urllib.request.urlopen = self._urlopen
+        server.set_user_env_key = self._set_env
+        server.env_api_key = self._env_key
+        super().tearDown()
+
+    # ---- 小工具 ----
+    def save(self, **data):
+        payload = {'intent': 'user-confirmed'}
+        payload.update(data)
+        return server.save_model_profile(payload)
+
+    def raw(self):
+        return json.loads(server.MODELS_FILE.read_text(encoding='utf-8'))
+
+    def profile(self, state, name=None, pid=None):
+        for p in state['profiles']:
+            if (pid and p['id'] == pid) or (name and p['name'] == name):
+                return p
+        return None
+
+    def add_backup(self, **kw):
+        data = {'providerId': 'openai', 'name': '备用模型', 'baseUrl': 'https://api.openai.com/v1',
+                'model': 'gpt-4o-mini', 'clientType': 'openai-chat', 'apiKey': 'sk-' + 'b' * 32}
+        data.update(kw)
+        return self.save(**data)
+
+    def headers(self):
+        return {str(k).lower(): v for k, v in self.sent[-1]['headers'].items()}
+
+    def stub(self, answer='可以'):
+        class Resp(object):
+            def __init__(self, data):
+                self._b = json.dumps(data).encode('utf-8')
+
+            def read(self):
+                return self._b
+
+        def fake(req, timeout=None):
+            self.sent.append({'url': req.full_url, 'headers': dict(req.header_items()),
+                              'body': json.loads(req.data.decode('utf-8'))})
+            return Resp({'model': 'stub', 'choices': [{'message': {'role': 'assistant', 'content': answer}}]})
+        urllib.request.urlopen = fake
+
+    # ---- 初始化与迁移 ----
+    def test_first_read_migrates_legacy_without_writing(self):
+        self.env.stored[server.ENV_KEY_NAME] = 'sk-' + 'd' * 32
+        state = server.models_state()
+        self.assertEqual(state['count'], 1)
+        self.assertEqual(state['defaultId'], server.DEFAULT_PROFILE_ID)
+        self.assertEqual(state['default']['model'], 'deepseek-flash')
+        self.assertTrue(state['default']['configured'], u'老用户已经配好 Key，绿点该是亮的')
+        self.assertFalse(server.MODELS_FILE.exists(), u'初始化/派生只能算在内存里，用户点「保存」才写盘')
+
+    def test_refresh_never_writes(self):
+        server.models_state()
+        server.get_settings(False)
+        server.model_catalog()
+        server.models_state()
+        self.assertFalse(server.MODELS_FILE.exists(), u'刷新界面不能触发保存')
+
+    # ---- 保存 ≠ 设为默认 ----
+    def test_save_second_model_keeps_default(self):
+        state = self.add_backup()
+        state = server.models_state()
+        self.assertEqual(state['count'], 2)
+        self.assertEqual(state['defaultId'], server.DEFAULT_PROFILE_ID, u'保存 B 不能把默认从 A 改成 B')
+        self.assertFalse(self.profile(state, name=u'备用模型')['isDefault'])
+        self.assertEqual(len(self.raw()['profiles']), 2)
+
+    def test_set_default_saves_latest_fields_and_takes_effect(self):
+        state = self.add_backup()
+        pid = self.profile(state, name=u'备用模型')['id']
+        state = self.save(id=pid, providerId='openai', name=u'备用模型', baseUrl='https://api.openai.com/v1',
+                          model='gpt-4o', clientType='openai-responses', makeDefault=True)
+        self.assertEqual(state['count'], 2)
+        target = self.profile(state, pid=pid)
+        self.assertEqual(state['defaultId'], pid)
+        self.assertEqual(target['model'], 'gpt-4o', u'设为默认时存的是界面上最新的字段')
+        self.assertEqual(target['clientType'], 'openai-responses')
+        cfg = server.get_settings(False)
+        self.assertEqual(cfg['model'], 'gpt-4o', u'设为默认要立即生效：后续调用用的就是它')
+        self.assertEqual(cfg['baseUrl'], 'https://api.openai.com/v1')
+        self.assertEqual(cfg['clientType'], 'openai-responses')
+        self.assertEqual(cfg['modelProfileId'], pid)
+
+    def test_custom_model_survives_restart(self):
+        state = self.save(providerId='custom', name=u'本地小模型', baseUrl='http://127.0.0.1:11434/v1',
+                          model='my-qwen-2026')
+        pid = self.profile(state, name=u'本地小模型')['id']
+        again = server.load_models()  # 模拟关窗重启：只从磁盘读回来
+        got = self.profile(again, pid=pid)
+        self.assertEqual(got['model'], 'my-qwen-2026', u'重启后自定义型号必须还在')
+        self.assertEqual(server._normalize_profile(got)['model'], 'my-qwen-2026',
+                         u'升级时的默认值补齐不能覆盖用户改过的型号')
+
+    def test_switching_provider_does_not_touch_other_profiles(self):
+        state = self.add_backup()
+        pid = self.profile(state, name=u'备用模型')['id']
+        state = self.save(id=pid, providerId='anthropic', name=u'备用模型',
+                          baseUrl='https://api.anthropic.com/v1', model='claude-haiku-4-5',
+                          clientType='anthropic-messages')
+        self.assertEqual(state['count'], 2)
+        legacy = self.profile(state, pid=server.DEFAULT_PROFILE_ID)
+        self.assertEqual(legacy['providerId'], 'deepseek')
+        self.assertEqual(legacy['model'], 'deepseek-flash')
+        self.assertTrue(legacy['isDefault'], u'改 B 的服务商不能动默认，也不能动 A')
+
+    def test_save_without_user_intent_is_refused(self):
+        with self.assertRaises(RuntimeError):
+            server.save_model_profile({'name': u'偷偷写一个', 'model': 'x'})
+        with self.assertRaises(RuntimeError):
+            server.delete_model_profile({'id': server.DEFAULT_PROFILE_ID})
+        self.assertFalse(server.MODELS_FILE.exists(), u'没有用户点击意图就一个字都不能写')
+
+    # ---- Key 的安全存储 ----
+    def test_api_key_never_written_in_plaintext(self):
+        self.add_backup()
+        text = server.MODELS_FILE.read_text(encoding='utf-8')
+        self.assertNotIn('sk-' + 'b' * 32, text, u'Key 必须是密文，明文不能落盘')
+        self.assertNotIn('"apiKey"', text, u'明文 Key 字段不该出现在配置里')
+        prof = [p for p in self.raw()['profiles'] if p['name'] == u'备用模型'][0]
+        self.assertTrue(prof.get('apiKeyEnc'), u'应存一份 DPAPI 加密的 Key')
+
+    def test_public_state_never_leaks_key(self):
+        state = self.add_backup()
+        dumped = json.dumps(state, ensure_ascii=False)
+        self.assertNotIn('sk-' + 'b' * 32, dumped)
+        for p in state['profiles']:
+            self.assertNotIn('apiKeyEnc', p)
+            self.assertNotIn('apiKey', p)
+        got = self.profile(state, name=u'备用模型')
+        self.assertTrue(got['hasKey'])
+        self.assertEqual(got['keyMasked'], u'••••bbbb')
+
+    def test_empty_key_on_save_keeps_stored_key(self):
+        state = self.add_backup()
+        pid = self.profile(state, name=u'备用模型')['id']
+        state = self.save(id=pid, providerId='openai', name=u'备用模型',
+                          baseUrl='https://api.openai.com/v1', model='gpt-4o-mini', apiKey='')
+        got = self.profile(state, pid=pid)
+        self.assertTrue(got['hasKey'], u'提交空 Key＝沿用已保存的 Key，不能把它抹掉')
+        self.assertEqual(got['keyTail'], 'bbbb')
+
+    def test_clear_key_removes_it(self):
+        state = self.add_backup()
+        pid = self.profile(state, name=u'备用模型')['id']
+        state = self.save(id=pid, providerId='openai', name=u'备用模型',
+                          baseUrl='https://api.openai.com/v1', model='gpt-4o-mini', clearApiKey=True)
+        got = self.profile(state, pid=pid)
+        self.assertFalse(got['hasKey'])
+        self.assertFalse(got['configured'], u'没有 Key 时绿点不能亮')
+
+    def test_default_profile_key_drives_get_settings(self):
+        state = self.add_backup()
+        pid = self.profile(state, name=u'备用模型')['id']
+        self.save(id=pid, providerId='openai', name=u'备用模型', baseUrl='https://api.openai.com/v1',
+                  model='gpt-4o-mini', makeDefault=True)
+        cfg = server.get_settings(True)
+        self.assertEqual(cfg['apiKey'], 'sk-' + 'b' * 32)
+        self.assertEqual(cfg['keySource'], 'profile')
+        self.assertEqual(server.get_settings(False)['apiKeyMasked'], u'••••bbbb')
+
+    # ---- 验证连接：只测，不写、不改默认 ----
+    def test_verify_uses_draft_fields_only(self):
+        self.add_backup()
+        before = server.MODELS_FILE.read_text(encoding='utf-8')
+        self.stub()
+        out = server.verify_model_profile({'id': 'm_draft', 'providerName': u'示例服务商',
+                                           'baseUrl': 'https://api.example.com/v1', 'model': 'draft-model',
+                                           'clientType': 'openai-chat', 'apiKey': 'sk-' + 'y' * 32})
+        self.assertTrue(out['ok'])
+        self.assertEqual(self.sent[-1]['url'], 'https://api.example.com/v1/chat/completions')
+        self.assertEqual(self.sent[-1]['body']['model'], 'draft-model')
+        self.assertIn('latencyMs', out)
+        self.assertEqual(server.MODELS_FILE.read_text(encoding='utf-8'), before, u'验证连接不许顺手保存')
+        self.assertEqual(server.models_state()['defaultId'], server.DEFAULT_PROFILE_ID, u'验证不许改默认')
+
+    def test_verify_failure_reports_error_and_changes_nothing(self):
+        state = self.add_backup()
+        pid = self.profile(state, name=u'备用模型')['id']
+        before = server.MODELS_FILE.read_text(encoding='utf-8')
+
+        def raise_401(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 401, 'Unauthorized', {},
+                                         io.BytesIO(b'{"error":{"message":"bad key"}}'))
+        urllib.request.urlopen = raise_401
+        out = server.verify_model_profile({'id': pid, 'baseUrl': 'https://api.openai.com/v1',
+                                           'model': 'gpt-4o-mini', 'clientType': 'openai-chat'})
+        self.assertFalse(out['ok'])
+        self.assertIn('401', out['error'], u'验证失败的提示要说清是哪一步不行')
+        self.assertEqual(server.MODELS_FILE.read_text(encoding='utf-8'), before, u'验证失败不能改存储')
+        self.assertEqual(server.models_state()['defaultId'], server.DEFAULT_PROFILE_ID, u'验证失败不能动默认')
+        self.assertEqual(server.get_settings(False)['model'], 'deepseek-flash', u'别的模型照旧可用')
+
+    def test_verify_without_any_key_says_so(self):
+        out = server.verify_model_profile({'baseUrl': 'https://api.deepseek.com', 'model': 'deepseek-flash',
+                                           'clientType': 'openai-chat'})
+        self.assertFalse(out['ok'])
+        self.assertIn('API Key', out['error'])
+        self.assertEqual(self.sent, [], u'没 Key 就别发请求')
+
+    # ---- 删除 ----
+    def test_delete_default_hands_default_over(self):
+        state = self.add_backup()
+        pid = self.profile(state, name=u'备用模型')['id']
+        state = server.delete_model_profile({'intent': 'user-confirmed', 'id': server.DEFAULT_PROFILE_ID})
+        self.assertEqual(state['count'], 1)
+        self.assertEqual(state['defaultId'], pid, u'删掉默认的模型后，默认要移交给剩下的那个')
+
+    def test_cannot_delete_the_last_model(self):
+        with self.assertRaises(ValueError):
+            server.delete_model_profile({'intent': 'user-confirmed', 'id': server.DEFAULT_PROFILE_ID})
+
+    def test_delete_unknown_model_raises(self):
+        self.add_backup()
+        with self.assertRaises(ValueError):
+            server.delete_model_profile({'intent': 'user-confirmed', 'id': 'm_not_exist'})
+
+    # ---- 真正调用走默认模型 ----
+    def test_llm_call_goes_through_default_profile(self):
+        state = self.add_backup()
+        pid = self.profile(state, name=u'备用模型')['id']
+        self.save(id=pid, providerId='openai', name=u'备用模型', baseUrl='https://api.openai.com/v1',
+                  model='gpt-4o-mini', makeDefault=True)
+        self.stub(answer='ok')
+        out = server.llm_call([{'role': 'user', 'content': 'hi'}])
+        self.assertEqual(self.sent[-1]['url'], 'https://api.openai.com/v1/chat/completions')
+        self.assertEqual(self.headers()['authorization'], 'Bearer sk-' + 'b' * 32)
+        self.assertEqual(out['text'], 'ok')
+        self.assertEqual(out['clientType'], 'openai-chat')
+
+    def test_llm_call_without_key_raises_readable_error(self):
+        with self.assertRaises(RuntimeError) as ctx:
+            server.llm_call([{'role': 'user', 'content': 'x'}])
+        self.assertIn('API Key', str(ctx.exception))
+        self.assertEqual(self.sent, [])
+
+
+class TestLlmAdapters(unittest.TestCase):
+    """接口适配层：三种接口类型各自组装请求，返回文本统一抠出来。"""
+
+    def test_chat_type_spec(self):
+        spec = server.llm_request_spec({'baseUrl': 'https://api.deepseek.com', 'model': 'deepseek-flash',
+                                        'clientType': 'openai-chat'},
+                                       [{'role': 'user', 'content': u'你好'}], key='k',
+                                       max_tokens=16, json_mode=True)
+        self.assertEqual(spec['url'], 'https://api.deepseek.com/chat/completions')
+        self.assertEqual(spec['headers']['Authorization'], 'Bearer k')
+        self.assertEqual(spec['body']['messages'][0]['content'], u'你好')
+        self.assertEqual(spec['body']['response_format'], {'type': 'json_object'})
+        self.assertEqual(spec['body']['max_tokens'], 16)
+
+    def test_responses_type_spec(self):
+        spec = server.llm_request_spec({'baseUrl': 'https://api.openai.com/v1', 'model': 'gpt-4o',
+                                        'clientType': 'openai-responses'},
+                                       [{'role': 'user', 'content': 'hi'}], key='k', max_tokens=32)
+        self.assertEqual(spec['url'], 'https://api.openai.com/v1/responses')
+        self.assertEqual(spec['body']['input'][0]['content'], 'hi')
+        self.assertEqual(spec['body']['max_output_tokens'], 32)
+        self.assertNotIn('messages', spec['body'])
+
+    def test_anthropic_type_spec(self):
+        spec = server.llm_request_spec({'baseUrl': 'https://api.anthropic.com/v1', 'model': 'claude-haiku-4-5',
+                                        'clientType': 'anthropic-messages'},
+                                       [{'role': 'system', 'content': u'你是助手'},
+                                        {'role': 'user', 'content': u'你好'}], key='k', temperature=0)
+        self.assertEqual(spec['url'], 'https://api.anthropic.com/v1/messages')
+        self.assertEqual(spec['headers']['x-api-key'], 'k')
+        self.assertEqual(spec['headers']['anthropic-version'], '2023-06-01')
+        self.assertEqual(spec['body']['system'], u'你是助手')
+        self.assertEqual([m['role'] for m in spec['body']['messages']], ['user'])
+        self.assertTrue(spec['body']['max_tokens'])
+
+    def test_unknown_client_type_falls_back_to_chat(self):
+        spec = server.llm_request_spec({'baseUrl': 'https://x.test/v1', 'model': 'm',
+                                        'clientType': u'天马行空'},
+                                       [{'role': 'user', 'content': 'x'}], key='k')
+        self.assertTrue(spec['url'].endswith('/chat/completions'))
+
+    def test_endpoint_requires_base_url(self):
+        with self.assertRaises(ValueError):
+            server.llm_endpoint('')
+
+    def test_extract_text_from_three_shapes(self):
+        self.assertEqual(server.llm_extract_text({'choices': [{'message': {'content': u'甲'}}]}), u'甲')
+        self.assertEqual(server.llm_extract_text({'output_text': u'乙'}), u'乙')
+        self.assertEqual(server.llm_extract_text(
+            {'output': [{'content': [{'type': 'output_text', 'text': u'丙'}]}]}), u'丙')
+        self.assertEqual(server.llm_extract_text({'content': [{'type': 'text', 'text': u'丁'}]}), u'丁')
+        self.assertEqual(server.llm_extract_text({'choices': [{'message': {'reasoning_content': u'戊'}}]}), u'戊')
+
+    def test_catalog_normalize_keeps_user_model(self):
+        prof = server._normalize_profile({'id': 'm1', 'providerId': 'deepseek', 'model': 'my-deepseek-x'})
+        self.assertEqual(prof['model'], 'my-deepseek-x')
+        self.assertEqual(server._normalize_profile(prof)['model'], 'my-deepseek-x', u'补齐默认值必须幂等')
+        self.assertEqual(prof['baseUrl'], 'https://api.deepseek.com')
+
+    def test_catalog_fills_missing_model_from_preset(self):
+        prof = server._normalize_profile({'id': 'm2', 'providerId': 'openai'})
+        self.assertEqual(prof['model'], 'gpt-4o-mini')
+        self.assertEqual(prof['baseUrl'], 'https://api.openai.com/v1')
+        self.assertEqual(prof['clientType'], 'openai-chat')
+
+    def test_model_catalog_shape(self):
+        cat = server.model_catalog()
+        ids = [p['id'] for p in cat['providers']]
+        self.assertIn('deepseek', ids)
+        self.assertIn('custom', ids)
+        self.assertEqual([t['id'] for t in cat['clientTypes']],
+                         ['openai-chat', 'openai-responses', 'anthropic-messages'])
+        deepseek = [p for p in cat['providers'] if p['id'] == 'deepseek'][0]
+        self.assertEqual(deepseek['models'][0]['id'], server.DEFAULT_MODEL)
 
 class TestCollectionPrejudge(TempApp):
     def test_multiple_installers_is_collection(self):

@@ -69,7 +69,8 @@ def sort_items(items,key,reverse):
  return sorted(items,key=f,reverse=reverse)
 
 def cmd_status(args):
- snap=snapshot(); cfg=server.get_settings(False); gs=server.group_list()
+ snap=snapshot(); cfg=server.get_settings(False); gs=server.group_list(); ms=server.models_state()
+ default_model=ms.get('default') or {}
  rows=snap['items'] if snap else []
  age=None; current=False
  if snap and snap.get('generatedAt'):
@@ -86,7 +87,10 @@ def cmd_status(args):
          'settings':{'baseUrl':cfg.get('baseUrl',''),'model':cfg.get('model',''),
                      'aiConfigured':bool(cfg.get('apiKeyMasked')),'scanAI':bool(cfg.get('scanAI')),
                      'autoAnalyze':bool(cfg.get('autoAnalyze')),'hideNotice':bool(cfg.get('hideNotice')),
-                     'destination':cfg.get('destination','')}}
+                     'destination':cfg.get('destination','')},
+         'models':{'count':len(ms.get('profiles') or []),'defaultId':ms.get('defaultId',''),
+                   'defaultName':default_model.get('name',''),'defaultModel':default_model.get('model',''),
+                   'configured':bool(default_model.get('configured'))}}
 
 def cmd_groups(args):
  gs=server.group_list()

@@ -371,7 +371,7 @@ async function restoreKeyBackup() {
 		if (!d || !d.ok) throw Error((d && d.error) || '恢复失败');
 		let c = d.result || {};
 		applySettingsState(c);
-		if (el('keyStatus')) el('keyStatus').textContent = '已用本机备份恢复：' + (c.apiKeyMasked || '');
+		if (typeof loadModels === 'function') await loadModels();
 		toast('已用本机备份恢复 Key（尾号 ' + String(c.apiKeyMasked || '').slice(-4) + '），AI 分析可以用了');
 	} catch (e) { toast('恢复失败：' + ((e && e.message) || e), true) }
 }
@@ -497,20 +497,28 @@ let settingsPane='model';
 async function openSettings(pane){
  el('settingsModal').classList.add('open');
  switchSettingsPane(pane||settingsPane||'model');
+ loadSettingsState();
+ loadModels()
+}
+/* 只读地把自动分析 / AI 判断目录 / 提示条这几个开关读进来——打开设置、刷新都不会写盘 */
+async function loadSettingsState(){
  let api=native();
- if(!api||typeof api.get_settings!=='function'){el('keyStatus').textContent='设置仅桌面版可修改';return}
+ if(!api||typeof api.get_settings!=='function'){ setModelStatus('设置仅桌面版可修改','err'); return }
  let d;try{d=await api.get_settings()}catch(e){d={ok:false,error:e.message}}
  if(!d||!d.ok)return toast('读取设置失败：'+((d&&d.error)||'未知错误'),true);
  let c=d.result||{};
- el('baseUrl').value=c.baseUrl||'';el('model').value=c.model||'';el('autoAnalyze').checked=!!c.autoAnalyze;el('scanAI').checked=!!c.scanAI;el('apiKey').value='';
+ if(el('autoAnalyze'))el('autoAnalyze').checked=!!c.autoAnalyze;
+ if(el('scanAI'))el('scanAI').checked=!!c.scanAI;
  if(el('showNotice'))el('showNotice').checked=!c.hideNotice;
- applySettingsState(c);
- let src=c.keySource==='env'?'（来自环境变量 '+c.keyName+'）':(c.keySource==='file'?'（用的是本机加密备份里的 Key）':'');
- let s=c.apiKeyMasked?('已配置：'+c.apiKeyMasked+src):'尚未配置';
- if(c.keyBackup&&c.apiKeyBackupMasked&&c.apiKeyBackupMasked!==c.apiKeyMasked)s+='　本机备份：'+c.apiKeyBackupMasked+'（环境变量坏了可点「用备份恢复」）';
- if(c.keyFormatProblem){s+='　⚠️ '+c.keyFormatProblem;el('keyStatus').style.color='var(--danger-fg)'}
- else el('keyStatus').style.color='var(--fg-faint)';
- el('keyStatus').textContent=s;
+ applySettingsState(c)
+}
+/* 「保存这两个开关」：只写这两个开关，不动任何模型配置，也不联网 */
+async function saveSettingsOptions(){
+ let api=native();
+ if(!api||typeof api.save_settings!=='function')return toast('设置仅桌面版可修改',true);
+ let d;try{d=await api.save_settings({autoAnalyze:el('autoAnalyze').checked,scanAI:el('scanAI').checked})}catch(e){d={ok:false,error:e.message}}
+ if(!d||!d.ok)return toast('保存失败：'+((d&&d.error)||'未知错误'),true);
+ toast('两个开关已保存（模型配置没动）')
 }
 function switchSettingsPane(pane){
  settingsPane=(pane==='ignore'||pane==='theme'||pane==='guide')?pane:'model';
@@ -519,16 +527,19 @@ function switchSettingsPane(pane){
  if(settingsPane==='ignore')loadIgnorePane();
  else if(settingsPane==='theme')syncThemeButtons();
  else if(settingsPane==='guide'){loadKbInfo();syncKb()}
+ else if(settingsPane==='model')loadModels()
 }
-async function saveSettings(){
- let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoAnalyze:el('autoAnalyze').checked,scanAI:el('scanAI').checked,hideNotice:el('showNotice')?!el('showNotice').checked:undefined});
- if(!d.ok)return alert(d.error);let r=d.result||{};let msg='设置已保存';
- if(r.keyStoredIn==='env')msg+='\nAPI Key 已写入本机环境变量 '+r.keyName+'（不落盘、不进 Git）';
- else if(r.keyStoredIn==='file')msg+='\n⚠️ 写入环境变量失败，API Key 暂存在本机加密文件里';
- if(r.keyWarning)msg+='\n\n⚠️ Key 格式提醒：'+r.keyWarning;
- el('apiKey').value='';el('settingsModal').classList.remove('open');applySettingsState(r);toast(msg)
+/* 立即 AI 分析：直接用当前默认模型跑，绝不顺手把界面上的东西存下来 */
+async function analyzeNow(){
+ if(!native())return alert('AI 分析仅桌面版可用');
+ let cfg=await native().get_settings();
+ if(!cfg.ok)return alert(cfg.error);
+ if(!cfg.result.apiKeyMasked)return alert('当前默认模型还没有可用的 Key：请到「设置 → 模型设置」给默认模型填好 Key，再点「保存」或「设置为默认」。');
+ if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请确认默认模型用的这把 Key（形如 sk- 开头共 35 位）后再点「立即 AI 分析」。');
+ let missing=groupItems().filter(x=>!x.aiDescription&&!String(x.note||'').trim()).map(x=>x.path);
+ if(!missing.length){let done=items.filter(x=>x.aiDescription&&x.aiDescription.searchedAt);return alert('所有项目都已有 AI 说明'+(done.length?'（'+analyzedAgo(done)+'分析过）':'')+'，不用再分析。\n想重做的话，回到表格勾选项目后按住 Shift 点工具栏的「AI 分析」。')}
+ el('settingsModal').classList.remove('open');toast('开始 AI 分析 '+missing.length+' 个项目，完成后会提示');await enrich(missing,false)
 }
-async function analyzeNow(){if(!native())return alert('AI 分析仅桌面版可用');let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoAnalyze:el('autoAnalyze').checked,scanAI:el('scanAI').checked});if(!d.ok)return alert(d.error);let cfg=await native().get_settings();if(!cfg.ok)return alert(cfg.error);if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先填写并保存');if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后再点「立即 AI 分析」。');let missing=groupItems().filter(x=>!x.aiDescription&&!String(x.note||'').trim()).map(x=>x.path);if(!missing.length){let done=items.filter(x=>x.aiDescription&&x.aiDescription.searchedAt);return alert('所有项目都已有 AI 说明'+(done.length?'（'+analyzedAgo(done)+'分析过）':'')+'，不用再分析。\n想重做的话，回到表格勾选项目后按住 Shift 点工具栏的「AI 分析」。')}el('settingsModal').classList.remove('open');toast('开始 AI 分析 '+missing.length+' 个项目，完成后会提示');await enrich(missing,false)}
 
 async function action(type){
  let picked=selectedItems(),paths=picked.map(x=>x.path);
@@ -562,16 +573,7 @@ async function action(type){
  }catch(e){toast('操作失败：'+e.message,true)}
  finally{update()}
 }
-async function clearKey(){
- if(!native()||typeof native().save_settings!=='function')return alert('仅桌面版可修改设置');
- if(!await uiConfirm('确认清除 DeepSeek API Key（同时删除本机环境变量 DEEPSEEK_API_KEY 与配置文件里的残留）？清除后 AI 说明与智能搜索的语义扩展将不可用。','清除 Key'))return;
- let d=await native().save_settings({clearApiKey:true});
- if(!d.ok)return alert(d.error);
- el('apiKey').value='';el('keyStatus').textContent='尚未配置';
- alert('已清除 API Key')
-}
-async function testConn(){let btn=el('testConn'),res=el('testResult');btn.disabled=true;res.textContent='正在测试连接…';res.style.color='var(--fg-faint)';try{if(!native()||typeof native().test_connection!=='function')throw Error('连接测试仅桌面版可用');let d=await native().test_connection({baseUrl:el('baseUrl').value,model:el('model').value,apiKey:el('apiKey').value});if(!d.ok)throw Error(d.error||'连接失败');let ok=d.modelOk===false?('模型“'+d.model+'”不在可用列表'):'连接成功';let lat=d.latencyMs!=null?(' · '+d.latencyMs+' ms'):'';let kt=d.keyTail?(' · Key 尾号 '+d.keyTail):'';res.textContent=ok+lat+kt;if(d.modelOk===false&&d.availableModels&&d.availableModels.length)res.textContent+='；可用模型：'+d.availableModels.join('、');res.style.color=d.modelOk===false?'var(--warn-fg)':'var(--ok-fg)';if(d.availableModels&&d.availableModels.length){res.title='可用模型: '+d.availableModels.join(', ');window.diagModels=d.availableModels}}catch(e){res.textContent='连接失败：'+e.message;res.style.color='var(--danger-fg)'}finally{btn.disabled=false}}
-document.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>setSort(th.dataset.sort));el('settingsBtn').onclick=()=>openSettings(settingsPane||'model');el('testConn').onclick=testConn;el('smartSearch').onclick=smartSearch;el('clearKey').onclick=clearKey;el('settingsCancel').onclick=()=>el('settingsModal').classList.remove('open');el('settingsAnalyze').onclick=analyzeNow;el('settingsSave').onclick=saveSettings;el('q').oninput=()=>{searchVersion++;naturalPaths=null;el('searchStatus').textContent='';el('smartSearch').disabled=false;el('smartSearch').classList.remove('searching');el('smartSearch').textContent='智能搜索';render()};el('q').onkeydown=e=>{if(e.key==='Enter')smartSearch()};el('filter').onchange=render;el('onlyNew').onchange=render;el('root').onchange=()=>{if(el('root').value==='__add__'){el('root').value='';addRoot()}else render()};el('rescan').onclick=()=>load(true);el('keep').onclick=()=>action('keep');el('move').onclick=()=>openMoveDialog(selectedPaths());el('del').onclick=()=>action('delete');el('all').onchange=e=>{visible().forEach(x=>e.target.checked?chosen.add(x.id):chosen.delete(x.id));render()};
+document.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>setSort(th.dataset.sort));el('settingsBtn').onclick=()=>openSettings(settingsPane||'model');el('smartSearch').onclick=smartSearch;el('settingsAnalyze').onclick=analyzeNow;el('q').oninput=()=>{searchVersion++;naturalPaths=null;el('searchStatus').textContent='';el('smartSearch').disabled=false;el('smartSearch').classList.remove('searching');el('smartSearch').textContent='智能搜索';render()};el('q').onkeydown=e=>{if(e.key==='Enter')smartSearch()};el('filter').onchange=render;el('onlyNew').onchange=render;el('root').onchange=()=>{if(el('root').value==='__add__'){el('root').value='';addRoot()}else render()};el('rescan').onclick=()=>load(true);el('keep').onclick=()=>action('keep');el('move').onclick=()=>openMoveDialog(selectedPaths());el('del').onclick=()=>action('delete');el('all').onchange=e=>{visible().forEach(x=>e.target.checked?chosen.add(x.id):chosen.delete(x.id));render()};
 el('noticeClose').onclick=async()=>{
 	hideNotice=true;syncNotice();
 	if(el('showNotice'))el('showNotice').checked=false;
@@ -587,7 +589,7 @@ el('askClose').onclick=()=>askModalOpen(false);
 el('askAgain').onclick=()=>{askModalOpen(false);if(el('qa'))el('qa').focus()};
 el('askSearch').onclick=()=>qaSearch((askQuestion||'').trim());
 el('askModal').onclick=e=>{if(e.target===el('askModal'))askModalOpen(false)};
-el('restoreKey').onclick=restoreKeyBackup;
+if(el('restoreKey'))el('restoreKey').onclick=restoreKeyBackup;
 el('kbQ').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();askKb()}else if(e.key==='Escape'){e.preventDefault();el('kbQ').value='';el('kbQ').blur()}};
 el('kbQ').onfocus=()=>{if(!llmReady)toast('要使用功能问答，请先到「设置 → 模型设置」中配置 LLM KEY',true)};
 syncKb();
@@ -965,13 +967,341 @@ el('ignore').onclick=()=>{
  if(!targets.length)return toast('请先在左侧勾选项目。');
  ignoreRows(targets);
 };
+/* ---------- V3.0：模型中心——多个常用模型，按服务商分组、可搜索，每个模型单独保存 ----------
+   约定：模型列表与「当前默认」由后端分开存储（models.json 里 profiles + defaultId，用稳定 ID 关联）；
+   这里只负责草稿：改字段、切换服务商、刷新列表都不会自动保存、也不会自动联网；
+   Key 只活在弹窗的内存里：#mKey 留空＝不动已保存的那把，明文永远不写 localStorage。 */
+let modelCatalog={providers:[],clientTypes:[],defaultProviderId:'deepseek'};
+let modelState={profiles:[],defaultId:'',default:null};
+let modelDraft=null;
+let modelEditingId='';
+let modelSearchText='';
+let modelBusy=false;
+function modelsApi(){ let api=native(); return (api&&typeof api.get_models==='function')?api:null }
+function setModelStatus(text,kind){
+ let box=el('modelStatus'); if(!box)return;
+ box.textContent=String(text||'');
+ box.className='model-status'+(kind?(' '+kind):'')
+}
+function setVerifyResult(text,kind){
+ let box=el('mVerifyResult'); if(!box)return;
+ box.textContent=String(text||'');
+ box.className='model-verify'+(kind?(' '+kind):'')
+}
+function providerOf(id){ return (modelCatalog.providers||[]).find(p=>p.id===id)||null }
+function providerName(id){ let p=providerOf(id); if(p)return p.name; return id==='custom'?'自定义':(id||'未分组') }
+function clientTypeName(id){ let ct=(modelCatalog.clientTypes||[]).find(x=>x.id===id); return ct?ct.name:(id||'openai-chat') }
+function modelById(id){ return (modelState.profiles||[]).find(p=>p.id===id)||null }
+function newModelId(){ return 'm_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6) }
+function suggestModelName(pid,model){ return providerName(pid)+(model?(' · '+model):'') }
+async function loadModelCatalog(){
+ if((modelCatalog.providers||[]).length)return modelCatalog;
+ let api=modelsApi(),d=null;
+ if(api&&typeof api.model_catalog==='function'){try{d=await api.model_catalog()}catch(_){d=null}}
+ if(d&&d.ok&&d.result&&(d.result.providers||[]).length){ modelCatalog=d.result; return modelCatalog }
+ modelCatalog={providers:[],defaultProviderId:'custom',clientTypes:[
+  {id:'openai-chat',name:'OpenAI Chat',path:'/chat/completions',hint:''},
+  {id:'openai-responses',name:'OpenAI Responses',path:'/responses',hint:''},
+  {id:'anthropic-messages',name:'Anthropic Messages',path:'/messages',hint:''}]};
+ return modelCatalog
+}
+/* 只读：从后端拿已保存的模型列表与当前默认，绝不含明文 Key */
+async function loadModels(){
+ let list=el('modelList'); if(!list)return;
+ let api=modelsApi();
+ if(!api){ list.innerHTML='<div class="model-empty">模型列表只能在桌面版里读取。</div>'; return }
+ await loadModelCatalog();
+ let d;try{d=await api.get_models()}catch(e){d={ok:false,error:e.message}}
+ if(!d||!d.ok){ list.innerHTML=''; setModelStatus('读取模型配置失败：'+((d&&d.error)||'未知错误'),'err'); return }
+ modelState=d.result||{profiles:[],defaultId:'',default:null};
+ renderModelList();
+ let bits=[],dd=modelState.default;
+ if(modelState.migrated)bits.push('已把旧版设置里的配置读进来，点某个模型的「保存」或「设置为默认」才会写成 models.json');
+ if(dd)bits.push('当前默认：'+(dd.name||dd.model||'')+(dd.configured?'':'（还没配齐，AI 功能不可用）'));
+ if((modelState.profiles||[]).length>1)bits.push('共 '+(modelState.profiles||[]).length+' 个模型');
+ setModelStatus(bits.join('　·　'),(dd&&!dd.configured)?'err':'')
+}
+function modelCardHtml(p){
+ let ok=!!p.configured;
+ let dotTitle=ok?'必要字段都齐了（服务商、接口地址、型号、Key）':('还没配齐：'+(p.hasKey?'接口地址或型号没填':'还没有 API Key'));
+ let badge=p.isDefault?'<span class="model-badge">当前默认</span>':'';
+ if(!ok)badge+='<span class="model-badge mute">未配齐</span>';
+ let meta=[clientTypeName(p.clientType),(p.model||'（未填型号）')];
+ if(p.baseUrl)meta.push(p.baseUrl);
+ meta.push(p.hasKey?('Key '+p.keyMasked):'未配置 Key');
+ let acts='<button type="button" class="mini" data-model-edit="'+esc(p.id)+'" title="打开这个模型：改字段、验证连接、保存或设为默认">编辑</button>';
+ if(!p.isDefault)acts+='<button type="button" class="mini" data-model-default="'+esc(p.id)+'" title="保存这个模型已存的内容，并立即切换为默认模型">设为默认</button>';
+ return '<div class="model-card'+(p.isDefault?' current':'')+'" data-id="'+esc(p.id)+'">'
+  +'<div class="model-main"><div class="model-name"><span class="model-dot'+(ok?' on':'')+'" title="'+esc(dotTitle)+'"></span>'
+  +'<span class="nm" title="'+esc(p.name)+'">'+esc(p.name)+'</span>'+badge+'</div>'
+  +'<div class="model-meta">'+esc(meta.join(' · '))+'</div></div>'
+  +'<div class="model-acts">'+acts+'</div></div>'
+}
+function renderModelList(){
+ let list=el('modelList'); if(!list)return;
+ let all=(modelState.profiles||[]).slice();
+ if(!all.length){
+  list.innerHTML='<div class="model-empty">还没有模型。点上面的「＋ 添加模型」加一个：选服务商 → 填型号和 Key → 想马上用就点「设置为默认」。</div>';
+  return
+ }
+ let q=String(modelSearchText||'').trim().toLowerCase();
+ let shown=all.filter(p=>{
+  if(!q)return true;
+  return [p.name,p.providerName,providerName(p.providerId),p.model,p.baseUrl,clientTypeName(p.clientType)].join(' ').toLowerCase().indexOf(q)>=0
+ });
+ if(!shown.length){
+  list.innerHTML='<div class="model-empty">没有匹配「'+esc(modelSearchText)+'」的模型。清空搜索框就能看全部 '+all.length+' 个。</div>';
+  return
+ }
+ let order=[];(modelCatalog.providers||[]).forEach(p=>order.push(p.id));
+ shown.forEach(p=>{ if(order.indexOf(p.providerId)<0)order.push(p.providerId) });
+ let html='';
+ order.forEach(pid=>{
+  let rows=shown.filter(p=>p.providerId===pid);
+  if(!rows.length)return;
+  html+='<div class="model-group" data-provider="'+esc(pid)+'">'
+   +'<div class="model-group-head">'+esc(providerName(pid))+'<span class="model-badge mute">'+rows.length+'</span></div>'
+   +rows.map(modelCardHtml).join('')+'</div>'
+ });
+ list.innerHTML=html;
+ list.querySelectorAll('[data-model-edit]').forEach(b=>b.onclick=()=>openModelModal(b.dataset.modelEdit,''));
+ list.querySelectorAll('[data-model-default]').forEach(b=>b.onclick=()=>setDefaultModel(b.dataset.modelDefault))
+}
+function renderProviderOptions(){
+ let sel=el('mProvider');
+ if(sel){
+  let cur=sel.value;
+  sel.innerHTML=(modelCatalog.providers||[]).map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('');
+  if(cur)sel.value=cur
+ }
+ let ct=el('mClientType');
+ if(ct){
+  let v=ct.value;
+  ct.innerHTML=(modelCatalog.clientTypes||[]).map(x=>'<option value="'+esc(x.id)+'">'+esc(x.name)+'</option>').join('');
+  if(v)ct.value=v
+ }
+}
+function renderModelDatalist(pid){
+ let box=el('mModelOptions'); if(!box)return;
+ let preset=providerOf(pid)||{models:[]};
+ box.innerHTML=(preset.models||[]).map(m=>'<option value="'+esc(m.id)+'">'+esc(m.name)+'</option>').join('')
+}
+function syncClientTypeHint(){
+ let hint=el('mClientTypeHint'),ct=el('mClientType'); if(!hint||!ct)return;
+ let info=(modelCatalog.clientTypes||[]).find(x=>x.id===ct.value);
+ hint.textContent=info?(info.name+' → 请求 '+(info.path||'')+(info.hint?('　'+info.hint):'')):''
+}
+function syncKeyState(){
+ let box=el('mKeyState'); if(!box)return;
+ if(modelDraft&&modelDraft.hasKey){
+  let src=modelDraft.keySource==='env'?'（来自本机环境变量 DEEPSEEK_API_KEY）':(modelDraft.keySource==='file'?'（来自本机加密备份）':'');
+  box.textContent='已保存：'+(modelDraft.keyMasked||'')+src+'　留空＝不改这把；想换就直接粘新的进来'
+ }else{
+  box.textContent='这个模型还没有 Key：填一把再保存（Key 加密存本机，界面只显示尾号）'
+ }
+}
+function blankProfile(id,pid){
+ let preset=providerOf(pid)||providerOf('custom')||{id:'custom',name:'自定义',baseUrl:'',clientType:'openai-chat',models:[]};
+ let first=(preset.models&&preset.models[0])?preset.models[0].id:'';
+ return {id:id,providerId:preset.id,providerName:preset.name,name:suggestModelName(preset.id,first),
+  baseUrl:preset.baseUrl||'',model:first,clientType:preset.clientType||'openai-chat',
+  hasKey:false,keyMasked:'',keySource:'',isDefault:false}
+}
+async function openModelModal(id,providerId){
+ await loadModelCatalog();
+ renderProviderOptions();
+ id=String(id||'');
+ let p=modelById(id),isNew=!p;
+ if(isNew){
+  let pid=providerId||(modelCatalog.providers[0]||{}).id||'custom';
+  modelEditingId=newModelId();
+  modelDraft=blankProfile(modelEditingId,pid)
+ }else{
+  modelEditingId=p.id;
+  modelDraft={id:p.id,providerId:p.providerId,providerName:p.providerName,name:p.name,baseUrl:p.baseUrl,model:p.model,
+   clientType:p.clientType,hasKey:!!p.hasKey,keyMasked:p.keyMasked||'',keySource:p.keySource||'',isDefault:!!p.isDefault}
+ }
+ el('modelTitle').textContent=isNew?'添加模型':('编辑模型 · '+(p.name||''));
+ el('mName').value=modelDraft.name||suggestModelName(modelDraft.providerId,modelDraft.model);
+ if(modelDraft.providerId)el('mProvider').value=modelDraft.providerId;
+ el('mBaseUrl').value=modelDraft.baseUrl||'';
+ if(modelDraft.clientType)el('mClientType').value=modelDraft.clientType;
+ el('mModel').value=modelDraft.model||'';
+ el('mKey').value='';el('mKey').type='password';el('mKeyShow').textContent='显示';
+ el('mKeyClear').checked=false;el('mKeyClear').disabled=!modelDraft.hasKey;
+ el('mDelete').hidden=isNew||!!modelDraft.isDefault||(modelState.profiles||[]).length<=1;
+ el('mDelete').title=modelDraft.isDefault?'默认模型不能删：先给别的模型点「设为默认」，再回来删它':'把这个模型从列表里删掉（其他模型不受影响）';
+ renderModelDatalist(modelDraft.providerId);syncClientTypeHint();syncKeyState();setVerifyResult('','');
+ el('modelModal').classList.add('open');
+ setTimeout(()=>{try{el('mName').focus()}catch(_){}},30)
+}
+/* 切换服务商：只填「空着的、或者刚好等于旧服务商预置值」的字段——用户自己改过的一律不动 */
+function onProviderChange(){
+ let pid=String(el('mProvider').value||'custom');
+ let preset=providerOf(pid),prev=providerOf(modelDraft&&modelDraft.providerId);
+ let prevModels=((prev&&prev.models)||[]).map(m=>m.id);
+ let base=String(el('mBaseUrl').value||'').trim();
+ if(!base||(prev&&base===String(prev.baseUrl||'').replace(/\/+$/,'')))el('mBaseUrl').value=preset?(preset.baseUrl||''):'';
+ let ct=el('mClientType').value;
+ if(!ct||(prev&&ct===prev.clientType))el('mClientType').value=preset?(preset.clientType||'openai-chat'):'openai-chat';
+ let md=String(el('mModel').value||'').trim();
+ let first=((preset&&preset.models)||[])[0];
+ let prevFirst=prevModels.length?prevModels[0]:'';
+ if(!md||md===prevFirst||prevModels.indexOf(md)>=0)el('mModel').value=first?first.id:'';
+ let nm=String(el('mName').value||'').trim();
+ let oldSuggest=suggestModelName(prev?prev.id:'',md);
+ if(!nm||nm===oldSuggest||nm===suggestModelName(prev?prev.id:'',prevFirst))el('mName').value=suggestModelName(pid,el('mModel').value);
+ if(modelDraft)modelDraft.providerId=pid;
+ renderModelDatalist(pid);syncClientTypeHint();
+ setVerifyResult('','')
+}
+function modelSnapshot(){
+ let pid=String((el('mProvider')&&el('mProvider').value)||(modelDraft&&modelDraft.providerId)||'custom');
+ return {id:(modelDraft&&modelDraft.id)||modelEditingId,
+  providerId:pid,providerName:providerName(pid),
+  name:String((el('mName')&&el('mName').value)||'').trim(),
+  baseUrl:String((el('mBaseUrl')&&el('mBaseUrl').value)||'').trim(),
+  model:String((el('mModel')&&el('mModel').value)||'').trim(),
+  clientType:String((el('mClientType')&&el('mClientType').value)||'openai-chat'),
+  apiKey:String((el('mKey')&&el('mKey').value)||'').trim(),
+  clearApiKey:!!(el('mKeyClear')&&el('mKeyClear').checked)}
+}
+/* 保存：只提交这一刻确定的快照，并且带上用户明确点了按钮的意图（intent），后端据此防住初始化回填；保存本身不联网 */
+async function saveModelDraft(makeDefault){
+ let api=modelsApi();
+ if(!api||typeof api.save_model_profile!=='function')return toast('仅桌面版可保存模型配置',true);
+ if(modelBusy)return;
+ let snap=modelSnapshot();
+ if(!snap.baseUrl){ setVerifyResult('还没填接口地址（Base URL），填好再保存。','err'); try{el('mBaseUrl').focus()}catch(_){} return }
+ if(!snap.model){ setVerifyResult('还没填模型型号，填好再保存。','err'); try{el('mModel').focus()}catch(_){} return }
+ if(!snap.apiKey&&!modelDraft.hasKey&&!snap.clearApiKey){ setVerifyResult('还没有可用的 API Key：填一把再保存（保存本身不联网，配好可以点「验证连接」）。','err'); try{el('mKey').focus()}catch(_){} return }
+ modelBusy=true; setVerifyResult(makeDefault?'正在保存并设为默认…':'正在保存…','');
+ try{
+  let d;
+  try{ d=await api.save_model_profile(Object.assign({intent:'user-confirmed',makeDefault:!!makeDefault},snap)) }catch(e){ d={ok:false,error:e.message} }
+  if(!d||!d.ok)throw Error((d&&d.error)||'保存失败');
+  modelState=d.result||modelState;
+  let saved=modelById(snap.id)||{};
+  modelEditingId=saved.id||snap.id;
+  modelDraft=Object.assign({},modelDraft,{id:modelEditingId,hasKey:!!saved.hasKey,keyMasked:saved.keyMasked||'',keySource:saved.keySource||'',isDefault:!!saved.isDefault});
+  el('mKey').value='';el('mKey').type='password';el('mKeyShow').textContent='显示';
+  el('mKeyClear').checked=false;el('mKeyClear').disabled=!modelDraft.hasKey;
+  el('modelTitle').textContent='编辑模型 · '+(saved.name||snap.name||'');
+  el('mDelete').hidden=!!saved.isDefault||(modelState.profiles||[]).length<=1;
+  syncKeyState();renderModelList();
+  if(makeDefault){
+   el('modelModal').classList.remove('open');
+   setModelStatus('已把「'+(saved.name||snap.name||'')+'」设为默认模型，AI 分析 / 智能搜索马上就用它','ok');
+   toast('已设为默认：'+(saved.name||snap.name||''))
+  }else{
+   setVerifyResult('已保存（默认模型没变）','ok');
+   setModelStatus('已保存「'+(saved.name||snap.name||'')+'」；默认模型还是「'+(((modelState.default||{}).name)||'—')+'」','ok');
+   toast('已保存：'+(saved.name||snap.name||'')+'（默认模型没变）')
+  }
+  refreshLlmReady()
+ }catch(err){
+  setVerifyResult('保存失败：'+((err&&err.message)||err),'err')
+ }finally{
+  modelBusy=false
+ }
+}
+/* 验证连接：只测这份草稿（含还没保存的改动），不写盘、不改默认，结果只显示在这个弹窗里 */
+async function verifyModelDraft(){
+ let api=modelsApi();
+ if(!api||typeof api.verify_model_profile!=='function')return toast('仅桌面版可验证连接',true);
+ let btn=el('mVerify'); if(btn)btn.disabled=true;
+ setVerifyResult('正在验证连接（只发一条很小的请求）…','');
+ try{
+  let d;
+  try{ d=await api.verify_model_profile(modelSnapshot()) }catch(e){ d={ok:false,error:e.message} }
+  if(!d||!d.ok)throw Error((d&&d.error)||'验证失败');
+  let r=d.result||{};
+  if(!r.ok){ setVerifyResult('验证失败：'+(r.error||'未知错误'),'err'); return }
+  let bits=['验证通过'];
+  if(r.latencyMs!=null)bits.push(r.latencyMs+' ms');
+  if(r.keyTail)bits.push('Key 尾号 '+r.keyTail);
+  if(r.reply)bits.push('模型回了「'+r.reply+'」');
+  setVerifyResult(bits.join(' · ')+'　（只测试：没保存、默认模型也没变）','ok')
+ }catch(err){
+  setVerifyResult('验证失败：'+((err&&err.message)||err),'err')
+ }finally{
+  if(btn)btn.disabled=false
+ }
+}
+/* 列表上的「设为默认」：把已存的这份配置设为默认（不改字段），立即生效 */
+async function setDefaultModel(id){
+ let api=modelsApi();
+ if(!api)return toast('仅桌面版可修改模型配置',true);
+ let p=modelById(id); if(!p)return;
+ if(p.isDefault)return toast('「'+p.name+'」已经是默认模型了');
+ if(!p.hasKey&&!await uiConfirm('「'+p.name+'」还没有 Key，设成默认后 AI 功能会不可用。\n确定要设成默认吗？','仍然设为默认'))return;
+ let d;
+ try{ d=await api.save_model_profile({intent:'user-confirmed',id:id,makeDefault:true}) }catch(e){ d={ok:false,error:e.message} }
+ if(!d||!d.ok)return toast('设置默认失败：'+((d&&d.error)||'未知错误'),true);
+ modelState=d.result||modelState; renderModelList();
+ let now=modelById(id)||{};
+ setModelStatus('已把「'+(now.name||'')+'」设为默认模型，AI 分析 / 智能搜索马上就用它','ok');
+ toast('已设为默认：'+(now.name||''));
+ refreshLlmReady()
+}
+async function deleteCurrentModel(){
+ let api=modelsApi();
+ if(!api||typeof api.delete_model_profile!=='function')return toast('仅桌面版可修改模型配置',true);
+ let p=modelById(modelDraft&&modelDraft.id);
+ if(!p)return toast('这个模型还没保存过，直接关掉窗口就行');
+ if(p.isDefault)return toast('默认模型不能删：先给别的模型点「设为默认」，再回来删它',true);
+ if(!await uiConfirm('确认删除模型「'+p.name+'」？\n只删这条配置，不动任何文件；它存的 Key 会一起删掉，删了就回不来。','删除'))return;
+ let d;
+ try{ d=await api.delete_model_profile({intent:'user-confirmed',id:p.id}) }catch(e){ d={ok:false,error:e.message} }
+ if(!d||!d.ok)return setVerifyResult('删除失败：'+((d&&d.error)||'未知错误'),'err');
+ modelState=d.result||modelState; renderModelList();
+ el('modelModal').classList.remove('open');
+ setModelStatus('已删除「'+p.name+'」','');
+ toast('已删除：'+p.name)
+}
+/* 默认模型变了以后，标题行的问答框锁 / 备份按钮状态跟着刷新（只读，不写盘） */
+async function refreshLlmReady(){
+ let api=native();
+ if(!api||typeof api.get_settings!=='function')return;
+ try{
+  let d=await api.get_settings();
+  if(d&&d.ok){
+   let c=d.result||{};
+   llmReady=!!c.apiKeyMasked;
+   if(el('restoreKey'))el('restoreKey').hidden=!c.keyBackup;
+   syncQa();if(typeof syncKb==='function')syncKb()
+  }
+ }catch(_){}
+}
+if(el('modelAdd'))el('modelAdd').onclick=()=>openModelModal('','');
+if(el('modelSearch'))el('modelSearch').oninput=()=>{modelSearchText=el('modelSearch').value;renderModelList()};
+if(el('settingsSaveOptions'))el('settingsSaveOptions').onclick=saveSettingsOptions;
+if(el('modelClose'))el('modelClose').onclick=()=>el('modelModal').classList.remove('open');
+if(el('mCancel'))el('mCancel').onclick=()=>el('modelModal').classList.remove('open');
+if(el('modelModal'))el('modelModal').onclick=ev=>{if(ev.target===el('modelModal'))el('modelModal').classList.remove('open')};
+if(el('mSave'))el('mSave').onclick=()=>saveModelDraft(false);
+if(el('mSetDefault'))el('mSetDefault').onclick=()=>saveModelDraft(true);
+if(el('mVerify'))el('mVerify').onclick=verifyModelDraft;
+if(el('mDelete'))el('mDelete').onclick=deleteCurrentModel;
+if(el('mProvider'))el('mProvider').onchange=onProviderChange;
+if(el('mClientType'))el('mClientType').onchange=syncClientTypeHint;
+if(el('mKeyShow'))el('mKeyShow').onclick=()=>{
+ let box=el('mKey'),show=box.type==='password';
+ box.type=show?'text':'password';
+ el('mKeyShow').textContent=show?'隐藏':'显示'
+};
+if(el('mKeyClear'))el('mKeyClear').onchange=()=>{
+ if(el('mKeyClear').checked)setVerifyResult('保存后会删掉这个模型已存的 Key；想换 Key 就直接粘新的进去。','')
+ else setVerifyResult('','')
+};
+
 el('themeBtn').onclick=toggleTheme;
 el('settingsBtn').onclick=()=>openSettings(settingsPane||'model');
 document.querySelectorAll('.settings-nav .nav-item').forEach(b=>b.onclick=()=>switchSettingsPane(b.dataset.pane));document.querySelectorAll('.ignore-tabs .seg-btn').forEach(b=>b.onclick=()=>switchIgnoreTab(b.dataset.ignoreTab));
 document.querySelectorAll('.seg-btn[data-theme]').forEach(b=>b.onclick=()=>setThemeMode(b.dataset.theme));
 document.querySelectorAll('[data-close-settings]').forEach(b=>b.onclick=()=>el('settingsModal').classList.remove('open'));
 el('ignoreClose').onclick=()=>el('settingsModal').classList.remove('open');
-el('settingsCancel').onclick=()=>el('settingsModal').classList.remove('open');
+
 let toastEl=el('toast');
 if(toastEl)toastEl.onclick=()=>{toastEl.className='toast';if(toastTimer)clearTimeout(toastTimer)};
 el('moveBrowse').onclick=moveBrowse;

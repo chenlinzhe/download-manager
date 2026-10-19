@@ -1,4 +1,4 @@
-import base64, ctypes, json, os, re, shutil, subprocess, tarfile, threading, time, urllib.parse, zipfile
+import base64, ctypes, json, os, re, shutil, subprocess, tarfile, threading, time, urllib.parse, uuid, zipfile
 from datetime import datetime
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -11,6 +11,7 @@ LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
 GROUPS_FILE=APP/'resource_groups.json'
 AI_HIDDEN_FILE=APP/'ai_hidden.json'
+MODELS_FILE=APP/'models.json'
 APP_VERSION='2.9'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
@@ -205,9 +206,10 @@ def open_path(path):
  else: subprocess.Popen(['explorer.exe','/select,',str(p)])
  return str(p)
 
-def _llm_error(e, key='', model=''):
+def _llm_error(e, key='', model='', label='DeepSeek'):
  """把 AI 调用异常翻译成用户能直接看懂的一句话。"""
  import urllib.error
+ label=str(label or '').strip() or 'DeepSeek'
  if isinstance(e,urllib.error.HTTPError):
   try: body=e.read().decode('utf-8','ignore')
   except Exception: body=''
@@ -218,16 +220,16 @@ def _llm_error(e, key='', model=''):
   if e.code==401:
    who=('，本次发送的 Key 尾号 '+key_tail(key)+'、共 %d 位'%len(key)) if key else ''
    fmt=key_format_problem(key)
-   hint=(fmt+'。请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后填入「模型设置」') if fmt else '请打开「模型设置」重新填写 Key，再点「测试连接」确认'
-   return 'DeepSeek 认为 API Key 无效或已失效（HTTP 401）'+who+'：'+hint
-  if e.code==402: return 'DeepSeek 账户余额不足（HTTP 402），请充值后再试'
-  if e.code==403: return 'DeepSeek 拒绝访问（HTTP 403）：'+text[:120]
-  if e.code==404: return 'DeepSeek 接口地址或模型不存在（HTTP 404）：%s（当前用的模型：%s，请到「模型设置」点「测试连接」查看可用模型）'%(text[:120],model or '未设置')
-  if e.code==429: return 'DeepSeek 触发限流（HTTP 429），请稍后再试'
-  if e.code>=500: return 'DeepSeek 服务暂时不可用（HTTP %d），请稍后再试'%e.code
-  return 'DeepSeek 返回错误（HTTP %d）：%s'%(e.code,text[:150])
+   hint=(fmt+'。请到服务商控制台重新复制 Key（DeepSeek 的形如 sk- 开头共 35 位）后填入「模型设置」') if fmt else '请打开「设置 → 模型设置」重新填写 Key，再点「验证连接」确认'
+   return label+' 认为 API Key 无效或已失效（HTTP 401）'+who+'：'+hint
+  if e.code==402: return label+' 账户余额不足（HTTP 402），请充值后再试'
+  if e.code==403: return label+' 拒绝访问（HTTP 403）：'+text[:120]
+  if e.code==404: return label+' 接口地址或模型不存在（HTTP 404）：%s（当前用的模型：%s，请到「模型设置」点「验证连接」确认地址与型号）'%(text[:120],model or '未设置')
+  if e.code==429: return label+' 触发限流（HTTP 429），请稍后再试'
+  if e.code>=500: return label+' 服务暂时不可用（HTTP %d），请稍后再试'%e.code
+  return label+' 返回错误（HTTP %d）：%s'%(e.code,text[:150])
  if isinstance(e,(urllib.error.URLError,TimeoutError,OSError)):
-  return '连不上 DeepSeek：%s（请检查网络或代理后重试）'%str(getattr(e,'reason',e))[:140]
+  return '连不上 %s：%s（请检查网络、代理或接口地址后重试）'%(label,str(getattr(e,'reason',e))[:140])
  return 'AI 调用失败：'+str(e)[:150]
 
 _VEC={'fp':None,'idf':None,'docs':None}
@@ -293,21 +295,15 @@ def _vector_recall(query,items,topk=30):
 def split_query_terms(query):
  return _tok(query)
 def natural_search(query):
- import urllib.request, urllib.error
- cfg=get_settings(True); key=cfg.get('apiKey','')
- if not key: raise ValueError('尚未配置 DeepSeek API Key')
+ profile=default_model_profile()
+ if not model_api_key(profile)[0]: raise ValueError('尚未配置 DeepSeek API Key')
  with LOCK: items=list(CACHE.get('items',[]))
  items=_with_notes({'items':items}).get('items',items)   # 带上 note / aiHidden：你删掉 AI 那句的格子不该再按 AI 原话搜到
  texts=[_search_text(x) for x in items]
  terms=split_query_terms(query)
- base=(cfg.get('baseUrl') or 'https://api.deepseek.com').strip().rstrip('/')
- model=cfg.get('model') or DEFAULT_MODEL
  def call_llm(prompt):
-  body=json.dumps({'model':model,'messages':[{'role':'user','content':prompt}],'temperature':0,'response_format':{'type':'json_object'}}).encode()
-  req=urllib.request.Request(base+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
-  try: raw=urllib.request.urlopen(req,timeout=30).read().decode('utf-8')
-  except Exception as e: raise RuntimeError(_llm_error(e,key,cfg.get('model')))
-  content=json.loads(raw)['choices'][0]['message']['content'].strip()
+  out=llm_call([{'role':'user','content':prompt}],profile,timeout=30,temperature=0,json_mode=True)
+  content=str(out.get('text') or '').strip()
   m=re.search(r'\{.*\}',content,re.S)
   if not m: raise ValueError('模型没有返回可解析的搜索条件')
   return json.loads(m.group(0))
@@ -525,6 +521,334 @@ def set_user_env_key(value):
 
 def clear_user_env_key(): return set_user_env_key('')
 
+# ---------- V3.0：文字模型中心（多模型配置；模型列表与「当前默认」分开存，只用稳定 ID 关联） ----------
+MODEL_LIST_VERSION=1
+DEFAULT_PROFILE_ID='m_default'
+CLIENT_TYPES=[
+ {'id':'openai-chat','name':'OpenAI Chat','path':'/chat/completions','hint':'最通用：DeepSeek、通义千问、Kimi、硅基流动等 OpenAI 兼容接口都选这个'},
+ {'id':'openai-responses','name':'OpenAI Responses','path':'/responses','hint':'OpenAI 新版 Responses 接口（input / output_text）'},
+ {'id':'anthropic-messages','name':'Anthropic Messages','path':'/messages','hint':'Claude 官方接口，用 x-api-key 与 anthropic-version 鉴权'},
+]
+CLIENT_TYPE_IDS=[t['id'] for t in CLIENT_TYPES]
+MODEL_CATALOG=[
+ {'id':'deepseek','name':'DeepSeek','baseUrl':'https://api.deepseek.com','clientType':'openai-chat',
+  'models':[{'id':'deepseek-flash','name':'DeepSeek Flash（快、便宜）'},{'id':'deepseek-chat','name':'DeepSeek Chat'}]},
+ {'id':'openai','name':'OpenAI','baseUrl':'https://api.openai.com/v1','clientType':'openai-chat',
+  'models':[{'id':'gpt-4o-mini','name':'GPT-4o mini'},{'id':'gpt-4o','name':'GPT-4o'}]},
+ {'id':'anthropic','name':'Anthropic（Claude）','baseUrl':'https://api.anthropic.com/v1','clientType':'anthropic-messages',
+  'models':[{'id':'claude-sonnet-4-5','name':'Claude Sonnet 4.5'},{'id':'claude-haiku-4-5','name':'Claude Haiku 4.5'}]},
+ {'id':'moonshot','name':'月之暗面 Kimi','baseUrl':'https://api.moonshot.cn/v1','clientType':'openai-chat',
+  'models':[{'id':'kimi-k2-0905-preview','name':'Kimi K2'},{'id':'moonshot-v1-8k','name':'Moonshot v1 8K'}]},
+ {'id':'zhipu','name':'智谱 GLM','baseUrl':'https://open.bigmodel.cn/api/paas/v4','clientType':'openai-chat',
+  'models':[{'id':'glm-4-flash','name':'GLM-4 Flash'},{'id':'glm-4-plus','name':'GLM-4 Plus'}]},
+ {'id':'qwen','name':'阿里通义千问','baseUrl':'https://dashscope.aliyuncs.com/compatible-mode/v1','clientType':'openai-chat',
+  'models':[{'id':'qwen-plus','name':'Qwen Plus'},{'id':'qwen-turbo','name':'Qwen Turbo'}]},
+ {'id':'siliconflow','name':'硅基流动','baseUrl':'https://api.siliconflow.cn/v1','clientType':'openai-chat',
+  'models':[{'id':'Qwen/Qwen3-8B','name':'Qwen3 8B'}]},
+ {'id':'ollama','name':'本地 Ollama','baseUrl':'http://127.0.0.1:11434/v1','clientType':'openai-chat',
+  'models':[{'id':'qwen2.5:7b','name':'Qwen2.5 7B（本机）'}]},
+ {'id':'custom','name':'自定义（OpenAI 兼容）','baseUrl':'','clientType':'openai-chat','models':[]},
+]
+_BASE_HINTS=[('deepseek','deepseek'),('openai.com','openai'),('anthropic','anthropic'),('moonshot','moonshot'),('bigmodel','zhipu'),('dashscope','qwen'),('siliconflow','siliconflow'),('11434','ollama')]
+
+def _now_iso(): return datetime.now().isoformat(timespec='seconds')
+def _new_model_id(): return 'm_'+uuid.uuid4().hex[:10]
+def _catalog_provider(provider_id):
+ for p in MODEL_CATALOG:
+  if p['id']==provider_id: return p
+ return None
+def _provider_of_base(base):
+ low=str(base or '').lower()
+ for key,pid in _BASE_HINTS:
+  if key in low: return pid
+ return 'custom'
+
+def _normalize_profile(raw):
+ """把一个模型配置补齐成完整快照：**只填空值**，绝不覆盖用户已经填过/改过的型号、名称、地址、接口类型。"""
+ raw=dict(raw or {})
+ pid=str(raw.get('id') or '').strip() or _new_model_id()
+ base=str(raw.get('baseUrl') or '').strip().rstrip('/')
+ provider_id=str(raw.get('providerId') or '').strip() or _provider_of_base(base)
+ preset=_catalog_provider(provider_id)
+ if preset is None:
+  provider_id='custom'; preset=_catalog_provider('custom')
+ preset=preset or {}
+ model=str(raw.get('model') or '').strip()
+ if not model:
+  models=preset.get('models') or []
+  model=str(models[0]['id']) if models else ''
+ if provider_id=='deepseek': model=MODEL_ALIASES.get(model,model)  # 只纠正本应用自己用过的失效 DeepSeek 型号名
+ if not base: base=str(preset.get('baseUrl') or '').strip().rstrip('/')
+ client=str(raw.get('clientType') or '').strip()
+ if client not in CLIENT_TYPE_IDS: client=str(preset.get('clientType') or 'openai-chat')
+ if client not in CLIENT_TYPE_IDS: client='openai-chat'
+ name=str(raw.get('name') or '').strip()
+ if not name: name=((str(preset.get('name') or '未命名服务商')+' · '+model) if model else str(preset.get('name') or '未命名模型'))
+ profile={'id':pid,'providerId':provider_id,'providerName':str(raw.get('providerName') or preset.get('name') or provider_id).strip(),
+  'name':name,'baseUrl':base,'model':model,'clientType':client,
+  'createdAt':str(raw.get('createdAt') or '') or _now_iso(),'updatedAt':str(raw.get('updatedAt') or '') or _now_iso()}
+ enc=str(raw.get('apiKeyEnc') or '').strip()
+ if enc: profile['apiKeyEnc']=enc
+ return profile
+
+def _legacy_profile():
+ """老版本只在一个 settings.json 里放 baseUrl/model：把它派生成一个默认模型（只在内存里，不写盘）。"""
+ cfg=load_json_file(SETTINGS_FILE,{})
+ base=str(cfg.get('baseUrl') or 'https://api.deepseek.com').strip() or 'https://api.deepseek.com'
+ return {'id':DEFAULT_PROFILE_ID,'providerId':_provider_of_base(base),'name':'默认模型',
+  'baseUrl':base,'model':str(cfg.get('model') or DEFAULT_MODEL),
+  'clientType':str(cfg.get('clientType') or 'openai-chat')}
+
+def load_models():
+ """读模型配置。列表与「当前默认模型」分开存，只用稳定 ID 关联；models.json 不存在时按老配置派生（不写盘）。"""
+ raw=load_json_file(MODELS_FILE,None)
+ if isinstance(raw,dict) and isinstance(raw.get('profiles'),list):
+  profiles=[]
+  for item in raw['profiles']:
+   if isinstance(item,dict) and str(item.get('id') or '').strip(): profiles.append(_normalize_profile(item))
+  if not profiles: profiles=[_normalize_profile(_legacy_profile())]
+  default_id=str(raw.get('defaultId') or '').strip()
+  if not any(p['id']==default_id for p in profiles): default_id=profiles[0]['id']
+  return {'version':MODEL_LIST_VERSION,'defaultId':default_id,'profiles':profiles,'source':'file'}
+ return {'version':MODEL_LIST_VERSION,'defaultId':DEFAULT_PROFILE_ID,'profiles':[_normalize_profile(_legacy_profile())],'source':'legacy'}
+
+def default_model_profile():
+ data=load_models()
+ for p in data['profiles']:
+  if p['id']==data['defaultId']: return p
+ return data['profiles'][0] if data['profiles'] else _normalize_profile(_legacy_profile())
+
+def model_api_key(profile):
+ """这个模型该用哪把 Key：先用它自己存的；默认模型没有自己的 Key 时回退本机环境变量 / settings.json 的 DPAPI 备份。"""
+ profile=dict(profile or {})
+ own=unprotect_key(profile.get('apiKeyEnc')) or str(profile.get('apiKey') or '').strip()
+ if own: return own,'profile'
+ if str(profile.get('id') or '')==DEFAULT_PROFILE_ID:
+  env=env_api_key()
+  if env: return env,'env'
+  legacy=load_json_file(SETTINGS_FILE,{})
+  file_key=unprotect_key(legacy.get('apiKeyEnc')) or str(legacy.get('apiKey') or '')
+  if file_key: return file_key,'file'
+ return '',''
+
+def _public_profile(profile, default_id):
+ key,source=model_api_key(profile)
+ return {'id':profile['id'],'providerId':profile['providerId'],'providerName':profile['providerName'],
+  'name':profile['name'],'baseUrl':profile['baseUrl'],'model':profile['model'],'clientType':profile['clientType'],
+  'hasKey':bool(key),'keyMasked':('••••'+key_tail(key)) if key else '','keyTail':key_tail(key) if key else '',
+  'keySource':source,'configured':bool(profile.get('baseUrl') and profile.get('model') and key),
+  'isDefault':profile['id']==default_id,'canDelete':profile['id']!=default_id}
+
+def models_state():
+ data=load_models()
+ default_id=data['defaultId']
+ profiles=[_public_profile(p,default_id) for p in data['profiles']]
+ default=profiles[0] if profiles else None
+ for p in profiles:
+  if p['isDefault']: default=p; break
+ return {'profiles':profiles,'defaultId':default['id'] if default else '','count':len(profiles),
+  'migrated':data.get('source')!='file',
+  'default':({'id':default['id'],'name':default['name'],'providerName':default['providerName'],'model':default['model'],
+   'baseUrl':default['baseUrl'],'clientType':default['clientType'],'configured':default['configured'],'hasKey':default['hasKey'],
+   'keyMasked':default['keyMasked']} if default else None)}
+
+def model_catalog():
+ """前端唯一的数据源：预置服务商 + 型号 + 三种接口类型。"""
+ return {'providers':[{'id':p['id'],'name':p['name'],'baseUrl':p['baseUrl'],'clientType':p['clientType'],
+   'models':[{'id':m['id'],'name':m['name']} for m in p['models']]} for p in MODEL_CATALOG],
+  'clientTypes':[{'id':t['id'],'name':t['name'],'path':t['path'],'hint':t['hint']} for t in CLIENT_TYPES],
+  'defaultProviderId':'deepseek'}
+
+def _write_models(state):
+ payload={'version':MODEL_LIST_VERSION,'defaultId':str(state.get('defaultId') or ''),
+  'profiles':[dict(p) for p in (state.get('profiles') or [])]}
+ for p in payload['profiles']:
+  p.pop('apiKey',None); p.pop('apiKeyMasked',None); p.pop('apiKeyTail',None)  # 明文 Key 永不落盘
+ if not payload['defaultId'] and payload['profiles']: payload['defaultId']=payload['profiles'][0]['id']
+ save_json_file(MODELS_FILE,payload)
+ return payload
+
+def _require_user_save(payload):
+ if str((payload or {}).get('intent') or '')!='user-confirmed':
+  raise RuntimeError('模型配置只能由用户点击「保存」或「设置为默认」后写入（程序不能自己改模型配置）')
+
+def save_model_profile(payload):
+ """保存一个模型：只改这一个模型；makeDefault 时在同一次写入里「存最新字段 + 换默认」。"""
+ data=dict(payload or {})
+ _require_user_save(data)
+ state=load_models()
+ pid=str(data.get('id') or '').strip()
+ existing=None
+ for p in state['profiles']:
+  if p['id']==pid: existing=p; break
+ merged=dict(existing or {})
+ merged['id']=pid or _new_model_id()
+ for field in ('providerId','providerName','name','baseUrl','model','clientType'):
+  if data.get(field) is not None: merged[field]=data.get(field)
+ if existing: merged['createdAt']=existing.get('createdAt') or _now_iso()
+ profile=_normalize_profile(merged)
+ prev_enc=str((existing or {}).get('apiKeyEnc') or '')
+ key=str(data.get('apiKey') or '').strip()
+ if data.get('clearApiKey'): profile.pop('apiKeyEnc',None)
+ elif key: profile['apiKeyEnc']=protect_key(key) or prev_enc
+ elif prev_enc: profile['apiKeyEnc']=prev_enc
+ if not str(profile.get('apiKeyEnc') or '').strip(): profile.pop('apiKeyEnc',None)
+ profile['updatedAt']=_now_iso()
+ if existing is None: state['profiles'].append(profile)
+ else:
+  for idx,p in enumerate(state['profiles']):
+   if p['id']==profile['id']: state['profiles'][idx]=profile; break
+ if data.get('makeDefault'): state['defaultId']=profile['id']
+ _write_models(state)
+ return models_state()
+
+def delete_model_profile(payload):
+ """删除一个模型；如果删的是当前默认，默认自动移交给剩下的第一个（不会把默认指向不存在的 ID）。"""
+ data=dict(payload or {})
+ _require_user_save(data)
+ pid=str(data.get('id') or '').strip()
+ state=load_models()
+ rest=[p for p in state['profiles'] if p['id']!=pid]
+ if len(rest)==len(state['profiles']): raise ValueError('要删除的模型不存在（可能已经被删掉了）')
+ if not rest: raise ValueError('至少要保留一个模型，不能全删；如果想换，先添加一个再删')
+ if state.get('defaultId')==pid: state['defaultId']=rest[0]['id']
+ state['profiles']=rest
+ _write_models(state)
+ return models_state()
+
+def _mirror_default_profile(base_url='', model=''):
+ """settings.json 那份老配置被显式保存时，镜像进默认模型，避免两份配置各说各话。"""
+ if not Path(MODELS_FILE).exists(): return
+ state=load_models()
+ if state.get('source')!='file': return
+ for p in state['profiles']:
+  if p['id']!=state['defaultId']: continue
+  changed=False
+  if base_url and p['baseUrl']!=base_url: p['baseUrl']=base_url; changed=True
+  if model and p['model']!=model: p['model']=model; changed=True
+  if changed:
+   p['updatedAt']=_now_iso(); _write_models(state)
+  return
+
+def llm_endpoint(base_url, client_type='openai-chat'):
+ """按接口类型拼出真正的请求地址。"""
+ base=str(base_url or '').strip().rstrip('/')
+ if not base: raise ValueError('还没填接口地址（Base URL）')
+ ct=client_type if client_type in CLIENT_TYPE_IDS else 'openai-chat'
+ if ct=='anthropic-messages': return base+'/messages'
+ if ct=='openai-responses': return base+'/responses'
+ return base+'/chat/completions'
+
+def llm_request_spec(profile, messages, key='', temperature=None, max_tokens=None, json_mode=False):
+ """接口适配层：同一份 messages 按三种接口类型翻译成各自的 url / headers / body。"""
+ profile=dict(profile or {})
+ ct=str(profile.get('clientType') or 'openai-chat')
+ if ct not in CLIENT_TYPE_IDS: ct='openai-chat'
+ model=str(profile.get('model') or '').strip()
+ if not model: raise ValueError('还没填模型型号')
+ msg=[dict(m) for m in (messages or [])]
+ spec={'url':llm_endpoint(profile.get('baseUrl'),ct),'clientType':ct,'model':model,
+  'headers':{'Content-Type':'application/json'},'body':{'model':model}}
+ headers=spec['headers']; body=spec['body']
+ if ct=='anthropic-messages':
+  headers['x-api-key']=key; headers['anthropic-version']='2023-06-01'
+  systems=[str(m.get('content') or '') for m in msg if m.get('role')=='system']
+  body['messages']=[m for m in msg if m.get('role')!='system']
+  if any(systems): body['system']='\n\n'.join(x for x in systems if x)
+  body['max_tokens']=int(max_tokens or 512)
+  if temperature is not None: body['temperature']=float(temperature)
+ elif ct=='openai-responses':
+  headers['Authorization']='Bearer '+key
+  body['input']=msg
+  if max_tokens: body['max_output_tokens']=int(max_tokens)
+  if temperature is not None: body['temperature']=float(temperature)
+  if json_mode: body['text']={'format':{'type':'json_object'}}
+ else:
+  headers['Authorization']='Bearer '+key
+  body['messages']=msg
+  if max_tokens: body['max_tokens']=int(max_tokens)
+  if temperature is not None: body['temperature']=float(temperature)
+  if json_mode: body['response_format']={'type':'json_object'}
+ return spec
+
+def _text_pieces(value):
+ out=[]
+ if isinstance(value,str): out.append(value)
+ elif isinstance(value,list):
+  for x in value: out.extend(_text_pieces(x))
+ elif isinstance(value,dict):
+  for k in ('text','content','value'):
+   if k in value: out.extend(_text_pieces(value[k]))
+ return out
+
+def llm_extract_text(raw):
+ """三种接口的返回长得都不一样，统一抠出模型说的话。"""
+ data=raw if isinstance(raw,dict) else {}
+ out=[]
+ if isinstance(data.get('output_text'),str): out.append(data['output_text'])
+ for ch in data.get('choices') or []:
+  if isinstance(ch,dict):
+   msg=ch.get('message') or ch.get('delta') or {}
+   if isinstance(msg,dict): out.extend(_text_pieces(msg.get('content')))
+ for item in data.get('output') or []:
+  if isinstance(item,dict): out.extend(_text_pieces(item.get('content')))
+ for item in data.get('content') or []:
+  out.extend(_text_pieces(item))
+ text=''.join(x for x in out if x).strip()
+ if text: return text
+ alt=[]  # 有些推理模型只给 reasoning_content
+ for ch in data.get('choices') or []:
+  if isinstance(ch,dict):
+   msg=ch.get('message') or {}
+   if isinstance(msg,dict): alt.append(str(msg.get('reasoning_content') or ''))
+ return ''.join(alt).strip()
+
+def llm_call(messages, profile=None, key='', timeout=30, temperature=None, max_tokens=None, json_mode=False):
+ """所有文字模型请求唯一入口：统一适配、统一超时、统一错误结构。"""
+ prof=dict(profile or {}) or default_model_profile()
+ label=str(prof.get('providerName') or '文字模型').strip() or '文字模型'
+ model=str(prof.get('model') or DEFAULT_MODEL)
+ if not key: key,_source=model_api_key(prof)
+ if not key: raise RuntimeError('还没有可用的 API Key：请打开「设置 → 模型设置」给「%s」填好 Key 并保存'%label)
+ spec=llm_request_spec(prof,messages,key,temperature,max_tokens,json_mode)
+ import urllib.request
+ req=urllib.request.Request(spec['url'],data=json.dumps(spec['body']).encode('utf-8'),headers=spec['headers'])
+ t0=time.time()
+ try: raw=urllib.request.urlopen(req,timeout=timeout).read().decode('utf-8','replace')
+ except Exception as e: raise RuntimeError(_llm_error(e,key,model,label=label))
+ try: data=json.loads(raw)
+ except ValueError: raise RuntimeError('%s 返回的内容不是 JSON：%s'%(label,str(raw)[:160]))
+ return {'text':llm_extract_text(data),'raw':data,'model':str(data.get('model') or model),
+  'latencyMs':int((time.time()-t0)*1000),'usage':data.get('usage') or {},
+  'clientType':spec['clientType'],'endpoint':spec['url'],'providerName':label}
+
+def verify_model_profile(payload):
+ """验证连接：只用界面上的草稿字段，不写盘、不改默认；Key 留空时用这个模型已保存的 Key。"""
+ data=dict(payload or {})
+ pid=str(data.get('id') or '').strip()
+ base=str(data.get('baseUrl') or '').strip().rstrip('/')
+ model=str(data.get('model') or '').strip()
+ ct=str(data.get('clientType') or 'openai-chat')
+ if ct not in CLIENT_TYPE_IDS: ct='openai-chat'
+ label=str(data.get('providerName') or '文字模型')
+ key=str(data.get('apiKey') or '').strip(); source='draft' if key else ''
+ if not key:
+  for p in load_models()['profiles']:
+   if p['id']==pid: key,source=model_api_key(p); break
+ info={'model':model,'clientType':ct,'providerName':label,'keySource':source or 'none','keyTail':key_tail(key)}
+ if not base: return dict(info,ok=False,error='还没填接口地址（Base URL）')
+ if not model: return dict(info,ok=False,error='还没填模型型号')
+ if not key: return dict(info,ok=False,error='还没有可用的 API Key：请填一个再点「验证连接」（也可以先「保存」再验证）')
+ profile={'id':pid,'providerName':label,'baseUrl':base,'model':model,'clientType':ct}
+ t0=time.time()
+ try:
+  out=llm_call([{'role':'user','content':'只回复两个字：可以'}],profile,key=key,timeout=20,max_tokens=16)
+  result={'ok':True,'latencyMs':out['latencyMs'],'reply':str(out.get('text') or '')[:60],'endpoint':out['endpoint']}
+ except Exception as e:
+  result={'ok':False,'error':str(e),'latencyMs':int((time.time()-t0)*1000)}
+ result.update(info)
+ if not result.get('endpoint'): result['endpoint']=llm_endpoint(base,ct)
+ return result
 def get_settings(reveal=False):
  cfg={'baseUrl':'https://api.deepseek.com','model':DEFAULT_MODEL,'autoAnalyze':False,'scanAI':False,'hideNotice':False,'destination':''}
  cfg.update(load_json_file(SETTINGS_FILE,{}))
@@ -533,8 +857,16 @@ def get_settings(reveal=False):
  file_key=unprotect_key(cfg.get('apiKeyEnc')) or str(cfg.get('apiKey') or '')
  env_key=env_api_key()
  key=env_key or file_key
+ profile=default_model_profile()  # V3.0：用哪个模型由「默认模型」决定，老的 settings.json 仍煶兼容读写
+ if profile:
+  cfg['baseUrl']=profile.get('baseUrl') or cfg['baseUrl']
+  cfg['model']=profile.get('model') or cfg['model']
+  cfg['clientType']=profile.get('clientType') or 'openai-chat'
+  cfg['modelProfileId']=profile.get('id') or ''
+  cfg['modelProfileName']=profile.get('name') or ''
+  if not key: key=model_api_key(profile)[0]
  cfg['keyName']=ENV_KEY_NAME
- cfg['keySource']='env' if env_key else ('file' if file_key else '')
+ cfg['keySource']='env' if env_key else ('file' if file_key else ('profile' if key else ''))
  cfg['keyTail']=key_tail(key)
  cfg['keyFormatProblem']=key_format_problem(key)
  cfg['keyBackup']=bool(file_key)  # 本机是否留有 DPAPI 加密的备份（环境变量被改坏/清掉时能恢复）
@@ -544,7 +876,7 @@ def get_settings(reveal=False):
   return cfg
  cfg['apiKey']=key; return cfg
 
-_DERIVED=('apiKey','apiKeyMasked','apiKeyEnc','keyName','keySource','keyTail','keyFormatProblem','keyStoredIn','keyWarning','keyBackup','apiKeyBackupMasked')
+_DERIVED=('apiKey','apiKeyMasked','apiKeyEnc','keyName','keySource','keyTail','keyFormatProblem','keyStoredIn','keyWarning','keyBackup','apiKeyBackupMasked','clientType','modelProfileId','modelProfileName')
 
 def save_settings(data):
  """保存设置。API Key 写进本机环境变量，同时在配置文件里留一份只有本机当前用户能解密的备份（DPAPI）。"""
@@ -572,6 +904,7 @@ def save_settings(data):
  elif existing and stored=='file': backup=prev_enc
  if backup: old['apiKeyEnc']=backup
  else: old.pop('apiKeyEnc',None)
+ if data.get('baseUrl') or data.get('model'): _mirror_default_profile(old.get('baseUrl') or '',old.get('model') or '')
  save_json_file(SETTINGS_FILE,old); out=get_settings(False)
  out['keyStoredIn']=stored
  out['keyWarning']=key_format_problem(key) if key else ''
@@ -683,27 +1016,19 @@ def ask_help(question):
  q=str(question or '').strip()
  if not q: raise ValueError('请先输入想问的问题')
  q=q[:600]
- cfg=get_settings(True); key=cfg.get('apiKey','')
- if not key: raise ValueError(u'尚未配置 DeepSeek API Key，请到「设置 → 模型设置」填好并保存后再问')
+ profile=default_model_profile()
+ if not model_api_key(profile)[0]: raise ValueError(u'尚未配置 DeepSeek API Key，请到「设置 → 模型设置」填好并保存后再问')
  kb=kb_text()
  if not kb['text']: raise ValueError(u'没读到功能说明内容（打包时漏了 index.html / README.md）')
- base=(cfg.get('baseUrl') or 'https://api.deepseek.com').strip().rstrip('/')
- model=cfg.get('model') or DEFAULT_MODEL
  messages=[{'role':'system','content':KB_SYSTEM+u'\n\n【资料】\n'+kb['text']},{'role':'user','content':q}]
- body=json.dumps({'model':model,'messages':messages,'temperature':0.2,'max_tokens':900,'stream':False}).encode()
- req=urllib.request.Request(base+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
  t0=time.time()
- try: raw=urllib.request.urlopen(req,timeout=60).read().decode('utf-8')
- except Exception as e: raise RuntimeError(_llm_error(e,key,model))
- try:
-  data=json.loads(raw)
-  answer=(data['choices'][0]['message']['content'] or '').strip()
-  usage=data.get('usage') or {}
- except (KeyError,IndexError,ValueError,TypeError) as e: raise RuntimeError(u'DeepSeek 返回内容无法解析：'+str(e)[:120])
- if not answer: raise RuntimeError(u'DeepSeek 这次没给出回答，请再问一次')
- return {'answer':answer,'question':q,'model':data.get('model') or model,'latencyMs':int((time.time()-t0)*1000),
-  'usage':{'prompt':usage.get('prompt_tokens'),'completion':usage.get('completion_tokens'),
-   'cached':(usage.get('prompt_tokens_details') or {}).get('cached_tokens')},
+ out=llm_call(messages,profile,timeout=60,temperature=0.2,max_tokens=900)
+ answer=str(out.get('text') or '').strip()
+ usage=out.get('usage') or {}
+ if not answer: raise RuntimeError(u'%s 这次没给出回答，请再问一次'%(profile.get('providerName') or u'模型'))
+ return {'answer':answer,'question':q,'model':out.get('model') or profile.get('model'),'latencyMs':out.get('latencyMs') or int((time.time()-t0)*1000),
+  'usage':{'prompt':usage.get('prompt_tokens',usage.get('input_tokens')),'completion':usage.get('completion_tokens',usage.get('output_tokens')),
+   'cached':(usage.get('prompt_tokens_details') or {}).get('cached_tokens') or usage.get('cache_read_input_tokens')},
   'kb':{'chars':kb['chars'],'tokens':kb['tokens'],'sources':kb['sources'],'version':kb['version']}}
 
 def item_fingerprint(item): return '|'.join([item['name'].lower(),str(item['size']),item['modified']])
@@ -785,18 +1110,14 @@ def description_prompt(item,deep=False):
  return prompt
 
 def deepseek_description(item,deep=False):
- import urllib.request
- cfg=get_settings(True); key=cfg.get('apiKey','')
- if not key: raise ValueError('尚未配置 DeepSeek API Key，请打开「模型设置」填写。')
+ profile=default_model_profile()
+ if not model_api_key(profile)[0]: raise ValueError('尚未配置 DeepSeek API Key，请打开「模型设置」填写。')
  prompt=description_prompt(item,deep)
- body=json.dumps({'model':cfg['model'],'messages':[{'role':'user','content':prompt}],'temperature':0.1,'response_format':{'type':'json_object'}}).encode()
- req=urllib.request.Request(cfg['baseUrl']+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
- try: response=json.loads(urllib.request.urlopen(req,timeout=30).read().decode('utf-8'))
- except Exception as e: raise RuntimeError(_llm_error(e,key,cfg.get('model')))
+ out=llm_call([{'role':'user','content':prompt}],profile,timeout=30,temperature=0.1,json_mode=True)
  try:
-  content=response['choices'][0]['message']['content'].strip().strip(chr(96)).replace('json\n','',1)
+  content=str(out.get('text') or '').strip().strip(chr(96)).replace('json\n','',1)
   return json.loads(content)
- except (KeyError,IndexError,ValueError) as e: raise RuntimeError('DeepSeek 返回内容无法解析：'+str(e)[:120])
+ except ValueError as e: raise RuntimeError('%s 返回内容无法解析：%s'%(profile.get('providerName') or '模型',str(e)[:120]))
 
 def enrich_items(paths, force=False, deep=False):
  wanted=set(paths); cache=load_json_file(AI_CACHE_FILE,{}); notes=load_notes(); hidden=load_ai_hidden(); skipped=0
@@ -815,11 +1136,12 @@ def enrich_items(paths, force=False, deep=False):
   # force / deep：你明确要求重做，忽略缓存再问一遍 AI
   if fp in cache and not force and not deep: results[item['path']]=cache[fp]
   else: pending.append(item)
+ model_name=default_model_profile().get('model') or DEFAULT_MODEL
  def ask(item):
   desc=deepseek_description(item,deep)
   desc={'summary':str(desc.get('summary','')).strip()[:30],
         'searchedAt':datetime.now().isoformat(timespec='seconds'),
-        'model':get_settings(True)['model']}
+        'model':model_name}
   return item,desc
  from concurrent.futures import ThreadPoolExecutor,as_completed
  # DeepSeek requests run concurrently, with an explicit maximum of 10.
@@ -854,23 +1176,17 @@ def classify_collection(p):
  except OSError: return {'isCollection':False,'reason':'目录不可读'}
  sample=[x.name+('（目录）' if x.is_dir() else '') for x in children[:40]]
  if len(children)<2: return {'isCollection':False,'reason':'子项不足，不展开'}
- import urllib.request
- cfg=get_settings(True); key=cfg.get('apiKey','')
- if not key: return {'isCollection':False,'reason':'未配置AI，保守地视为完整包'}
+ profile=default_model_profile()
+ if not model_api_key(profile)[0]: return {'isCollection':False,'reason':'未配置AI，保守地视为完整包'}
  prompt=('判断这个下载目录下的一级文件夹，是一个完整软件/资料包，还是用户用于归类多个相互独立下载包的集合目录。'
          '只有当其直接子项明显是多个可各自独立整理、移动或删除的下载包时才判为集合；安装目录中的exe、dll、资源目录不是集合。'
          '只返回严格JSON：{"isCollection":true或false,"reason":"15字内理由"}。'
          '目录名：%s；直接子项：%s')%(p.name,'、'.join(sample))
- body=json.dumps({'model':cfg['model'],'messages':[{'role':'user','content':prompt}],
-                  'temperature':0,'response_format':{'type':'json_object'}}).encode()
- req=urllib.request.Request(cfg['baseUrl']+'/chat/completions',data=body,
-  headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
- try: response=json.loads(urllib.request.urlopen(req,timeout=30).read().decode('utf-8'))
- except Exception as e: raise RuntimeError(_llm_error(e,key,cfg.get('model')))
+ out=llm_call([{'role':'user','content':prompt}],profile,timeout=30,temperature=0,json_mode=True)
  try:
-  content=response['choices'][0]['message']['content'].strip().strip(chr(96)).replace('json\n','',1)
+  content=str(out.get('text') or '').strip().strip(chr(96)).replace('json\n','',1)
   result=json.loads(content)
- except (KeyError,IndexError,ValueError) as e: raise RuntimeError('DeepSeek 返回内容无法解析：'+str(e)[:120])
+ except ValueError as e: raise RuntimeError('%s 返回内容无法解析：%s'%(profile.get('providerName') or '模型',str(e)[:120]))
  return {'isCollection':bool(result.get('isCollection')),'reason':str(result.get('reason',''))[:30]}
 
 def collection_prejudge(p):
