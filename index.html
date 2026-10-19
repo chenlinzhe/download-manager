@@ -252,6 +252,11 @@ html.dark .model-badge{background:var(--surface)}
 .model-card .model-meta{font-size:12px;color:var(--fg-faint);line-height:1.6;word-break:break-all}
 .model-card .model-acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex:0 0 auto}
 .model-empty{color:var(--fg-faint);font-size:13px;line-height:1.7;padding:14px 2px;white-space:pre-line}
+.model-card.preset{background:transparent;border-style:dashed}
+.model-card.preset .model-name .nm{font-weight:600;color:var(--fg-muted)}
+.model-summary{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12.5px;line-height:1.7;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 11px;margin:0 0 12px}
+.model-summary .k{color:var(--fg-faint);white-space:nowrap}
+.model-summary .v{color:var(--fg);word-break:break-all}
 .model-opts{margin:14px 0 0;border-top:1px solid var(--border);padding-top:10px}
 .model-opts>summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--fg-faint)}
 .model-opts[open]>summary{margin-bottom:8px}
@@ -276,7 +281,7 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
 </head>
 <body>
 <header>
- <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V3.0</span></div>
+ <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V3.1</span></div>
  <div class="qa-wrap"><input id="qa" class="qa-input" type="search" autocomplete="off" spellcheck="false" placeholder="自动问答：问一句，Enter 提交" title="要使用自动问答，请先到「设置」中配置 LLM KEY" aria-label="自动问答"></div>
  <div class="header-right">
   <span id="status">准备加载…</span>
@@ -356,12 +361,12 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
    <button type="button" class="nav-item" data-pane="ignore" title="搜索目录 / AI 分析 两个标签：查看并撤销被忽略的项目，以及被 AI 分析跳过的那几格">忽略名单</button>
    <button type="button" class="nav-item" data-pane="theme" title="跟随系统 / 浅色 / 深色">外观与主题</button>
    <button type="button" class="nav-item" data-pane="guide" title="逐条说明软件里的每个功能：扫描、建议、AI 分析、批量操作、设置">功能说明</button>
-   <div class="nav-foot">下载包管家 V3.0<br>程序不会运行任何安装包</div>
+   <div class="nav-foot">下载包管家 V3.1<br>程序不会运行任何安装包</div>
   </nav>
   <section class="settings-body">
    <div class="pane" data-pane="model">
     <h2>模型设置</h2>
-    <p class="hint">AI 说明、智能搜索和功能问答都用这里的「默认模型」。可以放多个常用模型：改哪个存哪个，保存不会动默认；想让某个模型马上生效，就点它旁边的「设为默认」。没配 Key 时表格显示「--」，扫描、清理建议这些本地功能照常用。</p>
+    <p class="hint">AI 说明、智能搜索和功能问答都用这里的「默认模型」。下面已经把常见的服务商（DeepSeek、OpenAI、Claude、Kimi、GLM、通义千问、硅基流动、本地 Ollama）列好了，<b>地址和型号都按预置填好，你只要点「填 Key」把 Key 粘进去</b>：保存不会动默认；想让某个模型马上生效，就点它旁边的「设为默认」。没配 Key 时表格显示「--」，扫描、清理建议这些本地功能照常用。</p>
     <div class="model-top">
      <input id="modelSearch" class="model-search" type="search" autocomplete="off" spellcheck="false" placeholder="搜索：模型名 / 服务商 / 型号 / 地址" title="按名称、服务商、型号、接口地址过滤下面的模型；分组标题也会一起过滤" aria-label="搜索模型">
      <button type="button" id="modelAdd" title="新增一个常用模型：先在弹窗里选服务商（可搜索），再填型号和 Key，最后决定是「保存」还是「设为默认」">＋ 添加模型</button>
@@ -504,7 +509,7 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
      </ul>
      <h3>十一、设置里另外三页</h3>
      <ul>
-      <li><b>模型设置</b>：填 DeepSeek 的 API Key、API 地址、模型名；「测试连接」用当前填写的内容发一次请求验证；「启动时自动分析缺少说明的项目」默认关闭；「扫描时用 AI 判断目录是否该展开」默认也关闭（关着扫描纯本地、不联网）；「立即 AI 分析」先保存再对缺少说明的项目跑一遍；「清除 Key」把本机环境变量与残留一起清掉。Key 只存本机用户环境变量 DEEPSEEK_API_KEY（加密保护），不写进配置文件、不进 Git。</li>
+      <li><b>模型设置</b>（模型中心）：常见的服务商（DeepSeek、OpenAI、Claude、Kimi、GLM、通义千问、硅基流动、本地 Ollama）默认就列在下面，地址和型号已经按预置填好——你只要点它的「填 Key」，把 Key 粘进去，再选「保存」（只存这一个、默认不变）或「设置为默认」（存下最新内容并马上切换）就行。打开某个模型后只有三件事要关心：<b>测试连通</b>（用当前填写的内容真发一条很小的请求，只测、不保存也不改默认）、<b>保存</b>、<b>设置为默认</b>。名字旁的绿点＝必要字段配齐了，卡片上标着「当前默认」。要改地址、型号、名称或接口类型，点弹窗里的「高级设置」；想加预置里没有的服务商，用「＋ 添加模型」。另外两个开关也在这一页：「启动时自动分析缺少说明的项目」（默认关闭）、「扫描时用 AI 判断目录是否该展开」（默认关闭，关着扫描纯本地、不联网）；「立即 AI 分析」对缺少说明的项目跑一遍。Key 用 Windows DPAPI 加密存在本机（models.json，每个模型各存各的，界面只显示尾号），明文不落盘、不进 Git，也不会写进 localStorage。</li>
       <li><b>忽略名单</b>：两个标签。①「搜索目录」＝扫描时会跳过的名字，点「恢复」撤销，恢复后要重新扫描才会回到列表；②「AI 分析」＝被 AI 分析跳过的那几格（你改写过的、或把「AI：…」那句删掉的），每行写着名称、理由、「你写的话」和路径，右边「让 AI 重新分析」只对这一个再问一次 AI，新的「AI：…」加在你的话下面、你写的字一个不动。两个标签上都带数量。</li>
       <li><b>外观与主题</b>：跟随系统 / 浅色 / 深色三选一；右上角的 ☾ / ☀ 按钮可以快速切换，选择会被记住。</li>
      </ul>
@@ -549,37 +554,12 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
    <h2 id="modelTitle">模型</h2>
    <button type="button" id="modelClose" class="dialog-x" title="关闭这个窗口，不保存这次的改动" aria-label="关闭">&#10005;</button>
   </div>
-  <p class="hint">每个模型单独保存。「保存」只存这一个模型、默认模型不变；「设置为默认」会把这上面最新填写的内容一起存下来，并马上切成默认（AI 分析、智能搜索立刻用它）。改字段、刷新列表都不会自己保存，也不会自己联网。</p>
-  <div class="field">
-   <label for="mName">名称（给自己看的）</label>
-   <input id="mName" autocomplete="off" spellcheck="false" placeholder="例如：DeepSeek 主力 / 便宜的 GLM">
-   <small class="muted">名字旁边的圆点＝必要字段齐不齐：<b>绿色</b>表示服务商、接口地址、型号、Key 都填好了；灰色表示跑不起来。</small>
-  </div>
-  <div class="field">
-   <label for="mProvider">服务商</label>
-   <select id="mProvider" title="先选服务商：接口地址和默认接口类型会按预置自动填好；选「自定义」就自己填地址"></select>
-   <small class="muted" id="mProviderHint"></small>
-  </div>
-  <div class="field">
-   <label for="mBaseUrl">接口地址（Base URL）</label>
-   <input id="mBaseUrl" autocomplete="off" spellcheck="false" placeholder="https://api.deepseek.com">
-   <small class="muted">只写服务商给的地址前缀，程序会按接口类型补上 /chat/completions、/responses 或 /messages。</small>
-  </div>
-  <div class="field">
-   <label for="mModel">模型型号</label>
-   <input id="mModel" list="mModelOptions" autocomplete="off" spellcheck="false" placeholder="例如 deepseek-flash">
-   <datalist id="mModelOptions"></datalist>
-   <small class="muted">可以从预置型号里挑，也可以直接改成服务商支持的任意型号；改过的型号原样保存，升级不会被预置值覆盖。</small>
-  </div>
-  <div class="field">
-   <label for="mClientType">接口类型</label>
-   <select id="mClientType"></select>
-   <small class="muted" id="mClientTypeHint"></small>
-  </div>
+  <p class="hint">只需要填 API Key：服务商、型号、接口地址都已经按预置填好了，要改就点下面的「高级设置」。「保存」只存这一个模型、默认模型不变；「设置为默认」存下这里最新的内容，并马上切换成默认。</p>
+  <div class="model-summary" id="mSummary" aria-live="polite"></div>
   <div class="field">
    <label for="mKey">API Key</label>
    <div class="row-inline">
-    <input id="mKey" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false" placeholder="留空＝不改动已保存的 Key">
+    <input id="mKey" type="password" autocomplete="new-password" autocapitalize="off" spellcheck="false" placeholder="把服务商给的 Key 粘进来">
     <button type="button" id="mKeyShow" title="临时显示 / 隐藏正在填写的 Key；只在这台电脑的内存里，不写任何文件">显示</button>
    </div>
    <small class="muted" id="mKeyState"></small>
@@ -587,11 +567,38 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
   </div>
   <div class="field">
    <div class="row-inline">
-    <button type="button" id="mVerify" title="用上面填的内容（含还没保存的改动）真发一次很小的请求；只测试，不保存、不改默认">验证连接</button>
+    <button type="button" id="mVerify" title="用这里填的内容（含还没保存的改动）真发一次很小的请求；只测试，不保存、不改默认">测试连通</button>
     <small id="mVerifyResult" class="muted model-verify" aria-live="polite"></small>
    </div>
-   <small class="muted">验证结果只显示在这个窗口里；某个模型验证失败不影响其他模型，也不会把这份草稿存下来。</small>
+   <small class="muted">测试结果只显示在这个窗口里；某个模型测试失败不影响别的模型，也不会把这份草稿存下来。</small>
   </div>
+  <details class="model-opts" id="mAdvanced">
+   <summary>高级设置（一般不用改）</summary>
+   <div class="field">
+    <label for="mName">名称（给自己看的）</label>
+    <input id="mName" autocomplete="off" spellcheck="false" placeholder="例如：DeepSeek 主力 / 便宜的 GLM">
+   </div>
+   <div class="field">
+    <label for="mProvider">服务商</label>
+    <select id="mProvider" title="换服务商：接口地址和默认接口类型会按预置填好；选「自定义」就自己填地址"></select>
+   </div>
+   <div class="field">
+    <label for="mModel">模型型号</label>
+    <input id="mModel" list="mModelOptions" autocomplete="off" spellcheck="false" placeholder="例如 deepseek-flash">
+    <datalist id="mModelOptions"></datalist>
+    <small class="muted">可以从预置型号里挑，也可以直接改成服务商支持的任意型号；改过的型号原样保存，升级不会被预置值覆盖。</small>
+   </div>
+   <div class="field">
+    <label for="mBaseUrl">接口地址（Base URL）</label>
+    <input id="mBaseUrl" autocomplete="off" spellcheck="false" placeholder="https://api.deepseek.com">
+    <small class="muted">只写服务商给的地址前缀，程序会按接口类型补上 /chat/completions、/responses 或 /messages。</small>
+   </div>
+   <div class="field">
+    <label for="mClientType">接口类型</label>
+    <select id="mClientType"></select>
+    <small class="muted" id="mClientTypeHint"></small>
+   </div>
+  </details>
   <div class="dialog-actions">
    <button type="button" id="mDelete" class="danger" title="把这个模型从列表里删掉（其他模型不受影响）">删除这个模型</button>
    <span class="spacer"></span>
@@ -647,6 +654,6 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="ctxMenu" class="ctx-menu"></div>
-<script src="app.js?v=20260820-41"></script>
+<script src="app.js?v=20260820-42"></script>
 </body>
 </html>

@@ -12,7 +12,7 @@ SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INV
 GROUPS_FILE=APP/'resource_groups.json'
 AI_HIDDEN_FILE=APP/'ai_hidden.json'
 MODELS_FILE=APP/'models.json'
-APP_VERSION='3.0'
+APP_VERSION='3.1'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -220,11 +220,11 @@ def _llm_error(e, key='', model='', label='DeepSeek'):
   if e.code==401:
    who=('，本次发送的 Key 尾号 '+key_tail(key)+'、共 %d 位'%len(key)) if key else ''
    fmt=key_format_problem(key)
-   hint=(fmt+'。请到服务商控制台重新复制 Key（DeepSeek 的形如 sk- 开头共 35 位）后填入「模型设置」') if fmt else '请打开「设置 → 模型设置」重新填写 Key，再点「验证连接」确认'
+   hint=(fmt+'。请到服务商控制台重新复制 Key（DeepSeek 的形如 sk- 开头共 35 位）后填入「模型设置」') if fmt else '请打开「设置 → 模型设置」重新填写 Key，再点「测试连通」确认'
    return label+' 认为 API Key 无效或已失效（HTTP 401）'+who+'：'+hint
   if e.code==402: return label+' 账户余额不足（HTTP 402），请充值后再试'
   if e.code==403: return label+' 拒绝访问（HTTP 403）：'+text[:120]
-  if e.code==404: return label+' 接口地址或模型不存在（HTTP 404）：%s（当前用的模型：%s，请到「模型设置」点「验证连接」确认地址与型号）'%(text[:120],model or '未设置')
+  if e.code==404: return label+' 接口地址或模型不存在（HTTP 404）：%s（当前用的模型：%s，请到「模型设置」点「测试连通」确认地址与型号）'%(text[:120],model or '未设置')
   if e.code==429: return label+' 触发限流（HTTP 429），请稍后再试'
   if e.code>=500: return label+' 服务暂时不可用（HTTP %d），请稍后再试'%e.code
   return label+' 返回错误（HTTP %d）：%s'%(e.code,text[:150])
@@ -631,9 +631,26 @@ def model_api_key(profile):
   if file_key: return file_key,'file'
  return '',''
 
+def _preset_suggestions(profiles):
+ """还没配过的服务商：按预置给一张空卡片，用户只需要粘一把 Key（地址、型号已经填好）。
+   这些卡片只在内存里生成，不是 models.json 的内容，也不写盘；保存之后对应服务商的卡片自动消失。"""
+ covered=set(str(p.get('providerId') or '') for p in (profiles or []))
+ out=[]
+ for prov in MODEL_CATALOG:
+  if prov['id'] in covered: continue
+  models=prov.get('models') or []
+  if not models: continue  # 「自定义」没有预置型号：想用就点「添加模型」自己填
+  model=str(models[0]['id'])
+  out.append({'id':'','preset':True,'providerId':prov['id'],'providerName':prov['name'],
+   'name':str(prov['name'])+' · '+model,'baseUrl':str(prov.get('baseUrl') or ''),'model':model,
+   'clientType':str(prov.get('clientType') or 'openai-chat'),
+   'hasKey':False,'keyMasked':'','keyTail':'','keySource':'','configured':False,
+   'isDefault':False,'canDelete':False})
+ return out
+
 def _public_profile(profile, default_id):
  key,source=model_api_key(profile)
- return {'id':profile['id'],'providerId':profile['providerId'],'providerName':profile['providerName'],
+ return {'id':profile['id'],'preset':False,'providerId':profile['providerId'],'providerName':profile['providerName'],
   'name':profile['name'],'baseUrl':profile['baseUrl'],'model':profile['model'],'clientType':profile['clientType'],
   'hasKey':bool(key),'keyMasked':('••••'+key_tail(key)) if key else '','keyTail':key_tail(key) if key else '',
   'keySource':source,'configured':bool(profile.get('baseUrl') and profile.get('model') and key),
@@ -643,10 +660,12 @@ def models_state():
  data=load_models()
  default_id=data['defaultId']
  profiles=[_public_profile(p,default_id) for p in data['profiles']]
+ suggested=_preset_suggestions(data['profiles'])
  default=profiles[0] if profiles else None
  for p in profiles:
   if p['isDefault']: default=p; break
- return {'profiles':profiles,'defaultId':default['id'] if default else '','count':len(profiles),
+ return {'profiles':profiles,'suggested':suggested,'defaultId':default['id'] if default else '','count':len(profiles),
+  'savedCount':len(profiles),'suggestedCount':len(suggested),
   'migrated':data.get('source')!='file',
   'default':({'id':default['id'],'name':default['name'],'providerName':default['providerName'],'model':default['model'],
    'baseUrl':default['baseUrl'],'clientType':default['clientType'],'configured':default['configured'],'hasKey':default['hasKey'],
@@ -823,7 +842,7 @@ def llm_call(messages, profile=None, key='', timeout=30, temperature=None, max_t
   'clientType':spec['clientType'],'endpoint':spec['url'],'providerName':label}
 
 def verify_model_profile(payload):
- """验证连接：只用界面上的草稿字段，不写盘、不改默认；Key 留空时用这个模型已保存的 Key。"""
+ """测试连通：只用界面上的草稿字段，不写盘、不改默认；Key 留空时用这个模型已保存的 Key。"""
  data=dict(payload or {})
  pid=str(data.get('id') or '').strip()
  base=str(data.get('baseUrl') or '').strip().rstrip('/')
@@ -838,7 +857,7 @@ def verify_model_profile(payload):
  info={'model':model,'clientType':ct,'providerName':label,'keySource':source or 'none','keyTail':key_tail(key)}
  if not base: return dict(info,ok=False,error='还没填接口地址（Base URL）')
  if not model: return dict(info,ok=False,error='还没填模型型号')
- if not key: return dict(info,ok=False,error='还没有可用的 API Key：请填一个再点「验证连接」（也可以先「保存」再验证）')
+ if not key: return dict(info,ok=False,error='还没有可用的 API Key：请填一个再点「测试连通」（也可以先「保存」再测）')
  profile={'id':pid,'providerName':label,'baseUrl':base,'model':model,'clientType':ct}
  t0=time.time()
  try:

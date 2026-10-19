@@ -1018,10 +1018,20 @@ async function loadModels(){
  let bits=[],dd=modelState.default;
  if(modelState.migrated)bits.push('已把旧版设置里的配置读进来，点某个模型的「保存」或「设置为默认」才会写成 models.json');
  if(dd)bits.push('当前默认：'+(dd.name||dd.model||'')+(dd.configured?'':'（还没配齐，AI 功能不可用）'));
- if((modelState.profiles||[]).length>1)bits.push('共 '+(modelState.profiles||[]).length+' 个模型');
+ let savedCount=(modelState.profiles||[]).length,pending=(modelState.suggested||[]).length;
+ if(savedCount>1)bits.push('已保存 '+savedCount+' 个模型');
+ if(pending)bits.push('另有 '+pending+' 个常见服务商没配 Key：点它的「填 Key」，粘进去就行');
  setModelStatus(bits.join('　·　'),(dd&&!dd.configured)?'err':'')
 }
 function modelCardHtml(p){
+ if(p.preset){
+  let meta=[clientTypeName(p.clientType),p.model,p.baseUrl].filter(Boolean);
+  return '<div class="model-card preset" data-provider="'+esc(p.providerId)+'">'
+   +'<div class="model-main"><div class="model-name"><span class="model-dot" title="还没有 API Key：点右边的「填 Key」"></span>'
+   +'<span class="nm" title="'+esc(p.name)+'">'+esc(p.name)+'</span><span class="model-badge mute">未配置</span></div>'
+   +'<div class="model-meta">'+esc(meta.join(' · '))+'</div></div>'
+   +'<div class="model-acts"><button type="button" class="mini" data-model-fill="'+esc(p.providerId)+'" title="填一把 '+esc(p.providerName)+' 的 API Key 就能用：地址和型号已经按预置填好，不用自己填">填 Key</button></div></div>'
+ }
  let ok=!!p.configured;
  let dotTitle=ok?'必要字段都齐了（服务商、接口地址、型号、Key）':('还没配齐：'+(p.hasKey?'接口地址或型号没填':'还没有 API Key'));
  let badge=p.isDefault?'<span class="model-badge">当前默认</span>':'';
@@ -1029,7 +1039,7 @@ function modelCardHtml(p){
  let meta=[clientTypeName(p.clientType),(p.model||'（未填型号）')];
  if(p.baseUrl)meta.push(p.baseUrl);
  meta.push(p.hasKey?('Key '+p.keyMasked):'未配置 Key');
- let acts='<button type="button" class="mini" data-model-edit="'+esc(p.id)+'" title="打开这个模型：改字段、验证连接、保存或设为默认">编辑</button>';
+ let acts='<button type="button" class="mini" data-model-edit="'+esc(p.id)+'" title="打开这个模型：改字段、测试连通、保存或设为默认">编辑</button>';
  if(!p.isDefault)acts+='<button type="button" class="mini" data-model-default="'+esc(p.id)+'" title="保存这个模型已存的内容，并立即切换为默认模型">设为默认</button>';
  return '<div class="model-card'+(p.isDefault?' current':'')+'" data-id="'+esc(p.id)+'">'
   +'<div class="model-main"><div class="model-name"><span class="model-dot'+(ok?' on':'')+'" title="'+esc(dotTitle)+'"></span>'
@@ -1039,7 +1049,7 @@ function modelCardHtml(p){
 }
 function renderModelList(){
  let list=el('modelList'); if(!list)return;
- let all=(modelState.profiles||[]).slice();
+ let all=(modelState.profiles||[]).concat(modelState.suggested||[]);
  if(!all.length){
   list.innerHTML='<div class="model-empty">还没有模型。点上面的「＋ 添加模型」加一个：选服务商 → 填型号和 Key → 想马上用就点「设置为默认」。</div>';
   return
@@ -1059,12 +1069,14 @@ function renderModelList(){
  order.forEach(pid=>{
   let rows=shown.filter(p=>p.providerId===pid);
   if(!rows.length)return;
+  rows.sort((a,b)=>((b.isDefault?1:0)-(a.isDefault?1:0))||((a.preset?1:0)-(b.preset?1:0)));
   html+='<div class="model-group" data-provider="'+esc(pid)+'">'
    +'<div class="model-group-head">'+esc(providerName(pid))+'<span class="model-badge mute">'+rows.length+'</span></div>'
    +rows.map(modelCardHtml).join('')+'</div>'
  });
  list.innerHTML=html;
  list.querySelectorAll('[data-model-edit]').forEach(b=>b.onclick=()=>openModelModal(b.dataset.modelEdit,''));
+ list.querySelectorAll('[data-model-fill]').forEach(b=>b.onclick=()=>openModelModal('',b.dataset.modelFill));
  list.querySelectorAll('[data-model-default]').forEach(b=>b.onclick=()=>setDefaultModel(b.dataset.modelDefault))
 }
 function renderProviderOptions(){
@@ -1091,6 +1103,17 @@ function syncClientTypeHint(){
  let info=(modelCatalog.clientTypes||[]).find(x=>x.id===ct.value);
  hint.textContent=info?(info.name+' → 请求 '+(info.path||'')+(info.hint?('　'+info.hint):'')):''
 }
+/* 弹窗里的只读信息块：服务商、型号、接口地址、接口类型——这些默认按预置填好，用户只需要管 Key */
+function syncModelSummary(){
+ let box=el('mSummary'); if(!box)return;
+ let pid=String((el('mProvider')&&el('mProvider').value)||(modelDraft&&modelDraft.providerId)||'custom');
+ let rows=[['服务商',providerName(pid)],
+  ['型号',String((el('mModel')&&el('mModel').value)||'').trim()],
+  ['接口地址',String((el('mBaseUrl')&&el('mBaseUrl').value)||'').trim()],
+  ['接口类型',clientTypeName(String((el('mClientType')&&el('mClientType').value)||''))]];
+ box.innerHTML=rows.map(r=>'<span class="k">'+esc(r[0])+'</span><span class="v">'+esc(r[1]||'—')+'</span>').join('')
+}
+
 function syncKeyState(){
  let box=el('mKeyState'); if(!box)return;
  if(modelDraft&&modelDraft.hasKey){
@@ -1121,7 +1144,9 @@ async function openModelModal(id,providerId){
   modelDraft={id:p.id,providerId:p.providerId,providerName:p.providerName,name:p.name,baseUrl:p.baseUrl,model:p.model,
    clientType:p.clientType,hasKey:!!p.hasKey,keyMasked:p.keyMasked||'',keySource:p.keySource||'',isDefault:!!p.isDefault}
  }
- el('modelTitle').textContent=isNew?'添加模型':('编辑模型 · '+(p.name||''));
+ let advNeeded=isNew&&(!providerId||providerId==='custom');
+ el('modelTitle').textContent=isNew?(advNeeded?'添加模型':('填 API Key · '+providerName(modelDraft.providerId))):('编辑模型 · '+(p.name||''));
+ if(el('mAdvanced'))el('mAdvanced').open=advNeeded;
  el('mName').value=modelDraft.name||suggestModelName(modelDraft.providerId,modelDraft.model);
  if(modelDraft.providerId)el('mProvider').value=modelDraft.providerId;
  el('mBaseUrl').value=modelDraft.baseUrl||'';
@@ -1131,9 +1156,9 @@ async function openModelModal(id,providerId){
  el('mKeyClear').checked=false;el('mKeyClear').disabled=!modelDraft.hasKey;
  el('mDelete').hidden=isNew||!!modelDraft.isDefault||(modelState.profiles||[]).length<=1;
  el('mDelete').title=modelDraft.isDefault?'默认模型不能删：先给别的模型点「设为默认」，再回来删它':'把这个模型从列表里删掉（其他模型不受影响）';
- renderModelDatalist(modelDraft.providerId);syncClientTypeHint();syncKeyState();setVerifyResult('','');
+ renderModelDatalist(modelDraft.providerId);syncClientTypeHint();syncKeyState();syncModelSummary();setVerifyResult('','');
  el('modelModal').classList.add('open');
- setTimeout(()=>{try{el('mName').focus()}catch(_){}},30)
+ setTimeout(()=>{try{el(advNeeded?'mBaseUrl':'mKey').focus()}catch(_){}},30)
 }
 /* 切换服务商：只填「空着的、或者刚好等于旧服务商预置值」的字段——用户自己改过的一律不动 */
 function onProviderChange(){
@@ -1152,7 +1177,7 @@ function onProviderChange(){
  let oldSuggest=suggestModelName(prev?prev.id:'',md);
  if(!nm||nm===oldSuggest||nm===suggestModelName(prev?prev.id:'',prevFirst))el('mName').value=suggestModelName(pid,el('mModel').value);
  if(modelDraft)modelDraft.providerId=pid;
- renderModelDatalist(pid);syncClientTypeHint();
+ renderModelDatalist(pid);syncClientTypeHint();syncModelSummary();
  setVerifyResult('','')
 }
 function modelSnapshot(){
@@ -1172,9 +1197,9 @@ async function saveModelDraft(makeDefault){
  if(!api||typeof api.save_model_profile!=='function')return toast('仅桌面版可保存模型配置',true);
  if(modelBusy)return;
  let snap=modelSnapshot();
- if(!snap.baseUrl){ setVerifyResult('还没填接口地址（Base URL），填好再保存。','err'); try{el('mBaseUrl').focus()}catch(_){} return }
- if(!snap.model){ setVerifyResult('还没填模型型号，填好再保存。','err'); try{el('mModel').focus()}catch(_){} return }
- if(!snap.apiKey&&!modelDraft.hasKey&&!snap.clearApiKey){ setVerifyResult('还没有可用的 API Key：填一把再保存（保存本身不联网，配好可以点「验证连接」）。','err'); try{el('mKey').focus()}catch(_){} return }
+ if(!snap.baseUrl){ if(el('mAdvanced'))el('mAdvanced').open=true; setVerifyResult('还没填接口地址（Base URL），填好再保存。','err'); try{el('mBaseUrl').focus()}catch(_){} return }
+ if(!snap.model){ if(el('mAdvanced'))el('mAdvanced').open=true; setVerifyResult('还没填模型型号，填好再保存。','err'); try{el('mModel').focus()}catch(_){} return }
+ if(!snap.apiKey&&!modelDraft.hasKey&&!snap.clearApiKey){ setVerifyResult('还没有可用的 API Key：填一把再保存（保存本身不联网，配好可以点「测试连通」）。','err'); try{el('mKey').focus()}catch(_){} return }
  modelBusy=true; setVerifyResult(makeDefault?'正在保存并设为默认…':'正在保存…','');
  try{
   let d;
@@ -1188,7 +1213,7 @@ async function saveModelDraft(makeDefault){
   el('mKeyClear').checked=false;el('mKeyClear').disabled=!modelDraft.hasKey;
   el('modelTitle').textContent='编辑模型 · '+(saved.name||snap.name||'');
   el('mDelete').hidden=!!saved.isDefault||(modelState.profiles||[]).length<=1;
-  syncKeyState();renderModelList();
+  syncKeyState();syncModelSummary();renderModelList();
   if(makeDefault){
    el('modelModal').classList.remove('open');
    setModelStatus('已把「'+(saved.name||snap.name||'')+'」设为默认模型，AI 分析 / 智能搜索马上就用它','ok');
@@ -1205,25 +1230,25 @@ async function saveModelDraft(makeDefault){
   modelBusy=false
  }
 }
-/* 验证连接：只测这份草稿（含还没保存的改动），不写盘、不改默认，结果只显示在这个弹窗里 */
+/* 测试连通：只测这份草稿（含还没保存的改动），不写盘、不改默认，结果只显示在这个弹窗里 */
 async function verifyModelDraft(){
  let api=modelsApi();
- if(!api||typeof api.verify_model_profile!=='function')return toast('仅桌面版可验证连接',true);
+ if(!api||typeof api.verify_model_profile!=='function')return toast('仅桌面版可测试连通',true);
  let btn=el('mVerify'); if(btn)btn.disabled=true;
- setVerifyResult('正在验证连接（只发一条很小的请求）…','');
+ setVerifyResult('正在测试连通（只发一条很小的请求）…','');
  try{
   let d;
   try{ d=await api.verify_model_profile(modelSnapshot()) }catch(e){ d={ok:false,error:e.message} }
-  if(!d||!d.ok)throw Error((d&&d.error)||'验证失败');
+  if(!d||!d.ok)throw Error((d&&d.error)||'测试失败');
   let r=d.result||{};
-  if(!r.ok){ setVerifyResult('验证失败：'+(r.error||'未知错误'),'err'); return }
-  let bits=['验证通过'];
+  if(!r.ok){ setVerifyResult('连通测试失败：'+(r.error||'未知错误'),'err'); return }
+  let bits=['连通正常'];
   if(r.latencyMs!=null)bits.push(r.latencyMs+' ms');
   if(r.keyTail)bits.push('Key 尾号 '+r.keyTail);
   if(r.reply)bits.push('模型回了「'+r.reply+'」');
   setVerifyResult(bits.join(' · ')+'　（只测试：没保存、默认模型也没变）','ok')
  }catch(err){
-  setVerifyResult('验证失败：'+((err&&err.message)||err),'err')
+  setVerifyResult('连通测试失败：'+((err&&err.message)||err),'err')
  }finally{
   if(btn)btn.disabled=false
  }
@@ -1275,6 +1300,10 @@ async function refreshLlmReady(){
 }
 if(el('modelAdd'))el('modelAdd').onclick=()=>openModelModal('','');
 if(el('modelSearch'))el('modelSearch').oninput=()=>{modelSearchText=el('modelSearch').value;renderModelList()};
+['mProvider','mModel','mBaseUrl','mClientType','mName'].forEach(function(id){
+ let box=el(id); if(!box)return;
+ box.addEventListener('input',syncModelSummary);box.addEventListener('change',syncModelSummary)
+});
 if(el('settingsSaveOptions'))el('settingsSaveOptions').onclick=saveSettingsOptions;
 if(el('modelClose'))el('modelClose').onclick=()=>el('modelModal').classList.remove('open');
 if(el('mCancel'))el('mCancel').onclick=()=>el('modelModal').classList.remove('open');

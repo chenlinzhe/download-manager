@@ -381,7 +381,37 @@ class TestModelProfiles(TempApp):
         server.models_state()
         self.assertFalse(server.MODELS_FILE.exists(), u'刷新界面不能触发保存')
 
-    # ---- 保存 ≠ 设为默认 ----
+    # ---- 预置服务商列表：常见的都列出来，用户只需要填 Key ----
+    def test_preset_list_shows_unconfigured_providers(self):
+        self.env.stored[server.ENV_KEY_NAME] = 'sk-' + 'd' * 32
+        state = server.models_state()
+        self.assertEqual(state['count'], 1)
+        ids = [p['providerId'] for p in state['suggested']]
+        for want in ('openai', 'anthropic', 'moonshot', 'zhipu', 'qwen', 'siliconflow', 'ollama'):
+            self.assertIn(want, ids, u'常见服务商要出现在列表里，用户只要填 Key')
+        self.assertNotIn('deepseek', ids, u'已经配好的服务商不该再出现一张空卡片')
+        for p in state['suggested']:
+            self.assertEqual(p['id'], '', u'预置卡片还没保存，不能有 ID')
+            self.assertTrue(p['baseUrl'] and p['model'] and p['clientType'], u'地址和型号要按预置填好，用户只需要管 Key')
+            self.assertFalse(p['hasKey'])
+            self.assertFalse(p['configured'])
+        self.assertEqual(state['suggestedCount'], len(state['suggested']))
+        self.assertFalse(server.MODELS_FILE.exists(), u'预置卡片只算在内存里，不写盘')
+
+    def test_preset_card_disappears_after_saving_that_provider(self):
+        self.add_backup()  # providerId=openai
+        state = server.models_state()
+        self.assertEqual(state['count'], 2)
+        self.assertNotIn('openai', [p['providerId'] for p in state['suggested']])
+        self.assertIn('anthropic', [p['providerId'] for p in state['suggested']])
+
+    def test_preset_keys_never_leak_into_saved_list(self):
+        state = server.models_state()
+        dumped = json.dumps(state, ensure_ascii=False)
+        self.assertNotIn('apiKey', dumped)
+        self.assertNotIn('apiKeyEnc', dumped)
+
+    # ---- 保存 ≠ 设为默认 ----    # ---- 保存 ≠ 设为默认 ----
     def test_save_second_model_keeps_default(self):
         state = self.add_backup()
         state = server.models_state()

@@ -88,7 +88,8 @@ def cmd_status(args):
                      'aiConfigured':bool(cfg.get('apiKeyMasked')),'scanAI':bool(cfg.get('scanAI')),
                      'autoAnalyze':bool(cfg.get('autoAnalyze')),'hideNotice':bool(cfg.get('hideNotice')),
                      'destination':cfg.get('destination','')},
-         'models':{'count':len(ms.get('profiles') or []),'defaultId':ms.get('defaultId',''),
+         'models':{'count':len(ms.get('profiles') or []),'suggested':len(ms.get('suggested') or []),
+                   'defaultId':ms.get('defaultId',''),
                    'defaultName':default_model.get('name',''),'defaultModel':default_model.get('model',''),
                    'configured':bool(default_model.get('configured'))}}
 
