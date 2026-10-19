@@ -11,7 +11,7 @@ LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
 GROUPS_FILE=APP/'resource_groups.json'
 AI_HIDDEN_FILE=APP/'ai_hidden.json'
-APP_VERSION='2.8'
+APP_VERSION='2.9'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -983,6 +983,29 @@ def _with_notes(data):
    item['note']=notes.get(str(item.get('path')),'')
    item['aiHidden']=str(item.get('path')) in hidden
  return data
+
+def ai_skip_list():
+ """V2.9：设置 → 忽略名单 →「AI 分析」标签要看的名单。
+ 被批量 AI 分析跳过的那几格有两种来源：你改写成了自己的话（user_notes.json 里有你的字），
+ 或者你把 AI 那句删干净了（ai_hidden.json 里有记录）。这里把它们一起列出来，
+ 方便你想让 AI 再说一遍时逐个点「让 AI 重新分析」。"""
+ notes=load_notes(); hidden=load_ai_hidden(); names={}
+ snap=load_json_file(SNAPSHOT_FILE,None)
+ if isinstance(snap,dict) and isinstance(snap.get('items'),list):
+  for item in snap['items']:
+   if isinstance(item,dict):
+    n=' '.join(str(item.get('displayName') or item.get('name') or '').split())
+    if n: names[str(item.get('path') or '')]=n
+ out=[]
+ for raw in set(notes)|set(hidden):
+  key=str(raw or '')
+  if not key: continue
+  note=str(notes.get(key) or '')
+  name=names.get(key) or (re.split(r'[\\/]',key.rstrip('\\/'))[-1] or key)
+  out.append({'path':key,'name':name,'note':note[:400],'hidden':key in hidden,
+              'when':str(hidden.get(key) or ''),'reason':'改写' if note else '删除'})
+ out.sort(key=lambda r:(0 if r['reason']=='改写' else 1,r['name'].lower()))
+ return out
 
 def load_ignore():
  """读取忽略名单。按项目名称忽略（同时记录路径，便于在界面上展示）。"""

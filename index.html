@@ -223,6 +223,12 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 .ignore-list{max-height:50vh;overflow:auto;margin-top:8px}
 .ignore-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 2px;border-bottom:1px solid var(--border);font-size:13px}
 .ignore-row:last-child{border-bottom:0}
+.ignore-tabs{margin:10px 0 6px}
+.ignore-row.ai{align-items:flex-start}
+.ignore-row .ignore-main{min-width:0;flex:1}
+.ignore-row .ignore-meta{color:var(--fg-faint);font-size:12px;line-height:1.6;word-break:break-all}
+.ignore-row .ignore-note{color:var(--fg-muted);font-size:12px;line-height:1.6;margin-top:2px;white-space:pre-line}
+.seg-count{color:var(--fg-faint);font-weight:400}
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:999px;border:2px solid transparent;background-clip:content-box}
@@ -233,7 +239,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </head>
 <body>
 <header>
- <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V2.8</span></div>
+ <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V2.9</span></div>
  <div class="qa-wrap"><input id="qa" class="qa-input" type="search" autocomplete="off" spellcheck="false" placeholder="自动问答：问一句，Enter 提交" title="要使用自动问答，请先到「设置」中配置 LLM KEY" aria-label="自动问答"></div>
  <div class="header-right">
   <span id="status">准备加载…</span>
@@ -310,10 +316,10 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
   <nav class="settings-nav" aria-label="设置分类">
    <div class="settings-title">设置</div>
    <button type="button" class="nav-item active" data-pane="model" title="DeepSeek 的 API Key、API 地址与模型">模型设置</button>
-   <button type="button" class="nav-item" data-pane="ignore" title="查看并撤销被忽略的项目名字">忽略名单</button>
+   <button type="button" class="nav-item" data-pane="ignore" title="搜索目录 / AI 分析 两个标签：查看并撤销被忽略的项目，以及被 AI 分析跳过的那几格">忽略名单</button>
    <button type="button" class="nav-item" data-pane="theme" title="跟随系统 / 浅色 / 深色">外观与主题</button>
    <button type="button" class="nav-item" data-pane="guide" title="逐条说明软件里的每个功能：扫描、建议、AI 分析、批量操作、设置">功能说明</button>
-   <div class="nav-foot">下载包管家 V2.8<br>程序不会运行任何安装包</div>
+   <div class="nav-foot">下载包管家 V2.9<br>程序不会运行任何安装包</div>
   </nav>
   <section class="settings-body">
    <div class="pane" data-pane="model">
@@ -352,7 +358,11 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    </div>
    <div class="pane" data-pane="ignore" hidden>
     <h2>忽略名单</h2>
-    <p class="hint">名单里的项目名称在扫描时会被跳过（不删除任何文件）。想让它重新出现就点「恢复」，再点工具栏的「重新扫描」。</p>
+    <div class="seg ignore-tabs" role="group" aria-label="查看哪一类忽略">
+     <button type="button" class="seg-btn active" data-ignore-tab="scan" title="这些项目名字在扫描时会被跳过，表格里不再出现">搜索目录<span class="seg-count" id="ignoreTabScanCount"></span></button>
+     <button type="button" class="seg-btn" data-ignore-tab="ai" title="这些格子你自己动过（改写过，或把 AI 那句删掉了），批量 AI 分析会跳过它们">AI 分析<span class="seg-count" id="ignoreTabAiCount"></span></button>
+    </div>
+    <p class="hint" id="ignoreHint">名单里的项目名称在扫描时会被跳过（不删除任何文件）。想让它重新出现就点「恢复」，再点工具栏的「重新扫描」。</p>
     <div id="ignoreBody" class="ignore-list"></div>
     <div class="dialog-actions"><button id="ignoreClose" class="primary">关闭</button></div>
    </div>
@@ -454,11 +464,11 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
      <h3>九、改这一格的说明（改完就是你说了算）</h3>
      <ul>
       <li><b>为什么要改</b>：AI 只看文件名、大小、时间和压缩包里的清单，名字含糊的包（比如 <code>setup_v2.exe</code>）可能说错、可能只说一半。</li>
-      <li><b>怎么进去</b>：<b>双击</b>这一格，或者用键盘 <kbd>Tab</kbd> 走到这一格按 <kbd>Enter</kbd>（<kbd>F2</kbd> 也行），也可以右键 →「改这一格的说明」；单击不会进编辑。<kbd>Enter</kbd> 换行，<kbd>Ctrl</kbd>+<kbd>Enter</kbd> 或点别处保存，<kbd>Esc</kbd> 放弃。</li>
+      <li><b>怎么进去</b>：<b>双击</b>这一格，或者用键盘 <kbd>Tab</kbd> 走到这一格按 <kbd>Enter</kbd>（<kbd>F2</kbd> 也行），也可以右键 →「改这一格的说明」；单击不会进编辑。保存就按 <kbd>Enter</kbd>（<kbd>Ctrl</kbd>+<kbd>Enter</kbd> 也一样），要换行用 <kbd>Shift</kbd>+<kbd>Enter</kbd>，点别处也会保存，<kbd>Esc</kbd> 放弃。</li>
       <li><b>框里那句「AI：…」是素材</b>：留着它保存＝你接受了它的内容，保存时把这段并入你的话（只去掉「AI：」这个来源标记）；删掉它保存＝你不要那部分；全删干净保存＝这一格空着，AI 不会再写回来。</li>
       <li><b>动过之后就归你</b>：只要这一格被你改过（改了 AI 那句、自己加了字、或者全删干净），它就不再单独显示「AI：」那一行，显示的全是你留下的内容；AI 原来那句也不再算这一格的内容（搜索、排序、智能搜索都不再匹配它）。</li>
       <li><b>还是想让 AI 单独说一遍</b>：勾上它单独点「AI 分析」（或按住 <kbd>Shift</kbd> 点），会先问一句；确认后新的一句「AI：…」加在你写的内容<b>下面</b>，你写的字一个都不动——只能你自己删。</li>
-      <li><b>批量分析会跳过你动过的</b>：点「AI 分析」时，你动过的项目默认不分析，信息条会写「另 N 项你自己动过，已跳过」。</li>
+      <li><b>批量分析会跳过你动过的</b>：点「AI 分析」时，你动过的项目默认不分析，信息条会写「另 N 项你自己动过，已跳过」。被跳过的是哪几格，在 设置 → 忽略名单 →「AI 分析」那个标签里全都列着（名称、理由、你的话），想让哪一个重新说一遍就点它右边的「让 AI 重新分析」。</li>
       <li><b>正在编辑的那一格不会被冲掉</b>：你在框里打字时，AI 分析的结果不会重绘这一格，保存完再看。</li>
       <li>最多 400 字，可以多行。你写的内容存在本机 <code>user_notes.json</code>，哪些格子已经归你的记录在 <code>ai_hidden.json</code>，都随扫描一直保留，也会被搜索框匹配到。</li>
      </ul>
@@ -470,7 +480,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
      <h3>十一、设置里另外三页</h3>
      <ul>
       <li><b>模型设置</b>：填 DeepSeek 的 API Key、API 地址、模型名；「测试连接」用当前填写的内容发一次请求验证；「启动时自动分析缺少说明的项目」默认关闭；「扫描时用 AI 判断目录是否该展开」默认也关闭（关着扫描纯本地、不联网）；「立即 AI 分析」先保存再对缺少说明的项目跑一遍；「清除 Key」把本机环境变量与残留一起清掉。Key 只存本机用户环境变量 DEEPSEEK_API_KEY（加密保护），不写进配置文件、不进 Git。</li>
-      <li><b>忽略名单</b>：看所有被忽略的名字，点「恢复」撤销；恢复后要重新扫描才会回到列表。</li>
+      <li><b>忽略名单</b>：两个标签。①「搜索目录」＝扫描时会跳过的名字，点「恢复」撤销，恢复后要重新扫描才会回到列表；②「AI 分析」＝被 AI 分析跳过的那几格（你改写过的、或把「AI：…」那句删掉的），每行写着名称、理由、「你写的话」和路径，右边「让 AI 重新分析」只对这一个再问一次 AI，新的「AI：…」加在你的话下面、你写的字一个不动。两个标签上都带数量。</li>
       <li><b>外观与主题</b>：跟随系统 / 浅色 / 深色三选一；右上角的 ☾ / ☀ 按钮可以快速切换，选择会被记住。</li>
      </ul>
      <h3>十二、标题栏的「自动问答」</h3>
@@ -553,6 +563,6 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="ctxMenu" class="ctx-menu"></div>
-<script src="app.js?v=20260820-38"></script>
+<script src="app.js?v=20260820-39"></script>
 </body>
 </html>

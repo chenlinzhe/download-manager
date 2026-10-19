@@ -564,6 +564,49 @@ class TestIgnore(TempApp):
         self.assertEqual(server._finalize(data)['items'], [])
 
 
+class TestAiSkipList(TempApp):
+    """设置 → 忽略名单 →「AI 分析」：被批量 AI 分析跳过的那几格要能列出来、能一处一处重做。"""
+
+    def test_empty_when_nothing_touched(self):
+        self.assertEqual(server.ai_skip_list(), [])
+
+    def test_lists_rewritten_and_deleted(self):
+        server.save_note(r'D:\Downloads\canon.exe', u'佳能打印机驱动')
+        server.save_note(r'D:\Downloads\old.zip', u'', True)
+        recs = server.ai_skip_list()
+        self.assertEqual(len(recs), 2)
+        by_path = {r['path']: r for r in recs}
+        canon = by_path[r'D:\Downloads\canon.exe']
+        self.assertEqual(canon['name'], 'canon.exe')
+        self.assertEqual(canon['note'], u'佳能打印机驱动')
+        self.assertEqual(canon['reason'], '改写')
+        self.assertTrue(canon['hidden'])
+        self.assertTrue(canon['when'], u'要记下你动它的时间')
+        old = by_path[r'D:\Downloads\old.zip']
+        self.assertEqual(old['note'], '')
+        self.assertEqual(old['reason'], '删除')
+
+    def test_rewritten_rows_come_first(self):
+        server.save_note(r'D:\Downloads\a-deleted.zip', u'', True)
+        server.save_note(r'D:\Downloads\z-rewritten.zip', u'我的话')
+        self.assertEqual([r['reason'] for r in server.ai_skip_list()], ['改写', '删除'])
+
+    def test_name_prefers_snapshot_display_name(self):
+        path = r'D:\Downloads\collection\pkg.zip'
+        server.save_note(path, u'留着')
+        snap = {'generatedAt': '2026-08-20T10:00:00', 'items': [
+            {'path': path, 'name': 'pkg.zip', 'displayName': u'某个集合 / pkg.zip'}]}
+        server.SNAPSHOT_FILE.write_text(json.dumps(snap), encoding='utf-8')
+        self.assertEqual(server.ai_skip_list()[0]['name'], u'某个集合 / pkg.zip')
+
+    def test_row_disappears_when_ai_comes_back(self):
+        path = r'D:\Downloads\canon.exe'
+        server.save_note(path, u'佳能打印机驱动')
+        self.assertEqual(len(server.ai_skip_list()), 1)
+        server.save_note(path, u'')
+        self.assertEqual(server.ai_skip_list(), [], u'AI 回来了，这条就不该再出现在名单里')
+
+
 class TestIgnoreDuringScan(TempApp):
     """重新扫描时直接跳过被忽略的项目，旧快照里的也要过滤掉。"""
 

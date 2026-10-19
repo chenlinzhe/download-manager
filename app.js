@@ -165,7 +165,7 @@ function noteCell(x){
 	let title=x.aiHidden?'双击可以改这一格（这一格已经是你的话，AI 不再单独显示）；想让 AI 重新说一遍就按住 Shift 点「AI 分析」':'双击可以改这一格，或者按 Enter；单击不会进去';
 	return '<td class="llm" tabindex="0" data-path="'+esc(x.path)+'" title="'+esc(title)+'">'+aiBox(x)+'</td>'
 }
-function render(){let v=visible();el('body').innerHTML=v.length?v.map(x=>'<tr data-path="'+esc(x.path)+'"><td><input class="pick" type="checkbox" data-id="'+esc(x.id)+'" '+(chosen.has(x.id)?'checked':'')+'></td><td><div class="name">'+esc(x.displayName||x.name)+(x.isNew?' <span class="new">新增</span>':'')+'</div><button class="path open-path" data-path="'+esc(x.parentPath||x.path)+'" title="打开包所在目录">所在目录：'+esc(x.parentPath||x.path)+'</button><div class="muted">'+esc(x.kind)+' · '+x.files+' 文件</div></td>'+noteCell(x)+'<td><span class="badge '+cls(x.recommendation)+'">'+x.recommendation+(x.manualKeep?'<button class="badge-x" data-unkeep="'+esc(x.path)+'" title="取消保留（按实际情况重新评估）">✕</button>':'')+'</span></td><td><b>'+x.score+'</b></td><td>'+fmt(x.size)+'</td><td>'+esc(x.modified.slice(0,10))+'<div class="muted">'+x.ageDays+' 天前</div></td><td>'+esc(x.redownload)+'</td><td class="'+(x.suspicious?'warn':'')+'">'+esc(x.registration)+'</td><td class="why">'+x.reasons.map(esc).join('；')+'</td></tr>').join(''):'<tr><td colspan="10" class="empty">没有符合筛选条件的项目</td></tr>';document.querySelectorAll('.open-path').forEach(e=>e.onclick=async()=>{let d=await native().open_path(e.dataset.path);if(!d.ok)alert(d.error)});document.querySelectorAll('button.badge-x').forEach(b=>b.onclick=e=>{e.stopPropagation();unkeepRows([b.dataset.unkeep])});document.querySelectorAll('td.llm').forEach(td=>{td.ondblclick=()=>editNote(td);td.onkeydown=e=>{if(e.key==='Enter'||e.key==='F2'){e.preventDefault();editNote(td)}}});document.querySelectorAll('.pick').forEach(e=>e.onchange=()=>{e.checked?chosen.add(e.dataset.id):chosen.delete(e.dataset.id);update()});update()}function selectedItems(){return items.filter(x=>chosen.has(x.id))}
+function render(){let v=visible();el('body').innerHTML=v.length?v.map(x=>'<tr data-path="'+esc(x.path)+'"><td><input class="pick" type="checkbox" data-id="'+esc(x.id)+'" '+(chosen.has(x.id)?'checked':'')+'></td><td><div class="name">'+esc(x.displayName||x.name)+(x.isNew?' <span class="new">新增</span>':'')+'</div><button class="path open-path" data-path="'+esc(x.parentPath||x.path)+'" title="打开包所在目录">所在目录：'+esc(x.parentPath||x.path)+'</button><div class="muted">'+esc(x.kind)+' · '+x.files+' 文件</div></td>'+noteCell(x)+'<td><span class="badge '+cls(x.recommendation)+'">'+x.recommendation+(x.manualKeep?'<button class="badge-x" data-unkeep="'+esc(x.path)+'" title="取消保留（按实际情况重新评估）">✕</button>':'')+'</span></td><td><b>'+x.score+'</b></td><td>'+fmt(x.size)+'</td><td>'+esc(x.modified.slice(0,10))+'<div class="muted">'+x.ageDays+' 天前</div></td><td>'+esc(x.redownload)+'</td><td class="'+(x.suspicious?'warn':'')+'">'+esc(x.registration)+'</td><td class="why">'+x.reasons.map(esc).join('；')+'</td></tr>').join(''):'<tr><td colspan="10" class="empty">没有符合筛选条件的项目</td></tr>';document.querySelectorAll('.open-path').forEach(e=>e.onclick=async()=>{let d=await native().open_path(e.dataset.path);if(!d.ok)alert(d.error)});document.querySelectorAll('button.badge-x').forEach(b=>b.onclick=e=>{e.stopPropagation();unkeepRows([b.dataset.unkeep])});document.querySelectorAll('td.llm').forEach(td=>{td.ondblclick=()=>editNote(td);td.onkeydown=e=>{if(e.target&&e.target.tagName==='TEXTAREA')return;if(e.key==='Enter'||e.key==='F2'){e.preventDefault();editNote(td)}}});document.querySelectorAll('.pick').forEach(e=>e.onchange=()=>{e.checked?chosen.add(e.dataset.id):chosen.delete(e.dataset.id);update()});update()}function selectedItems(){return items.filter(x=>chosen.has(x.id))}
 function selectedPaths(){return selectedItems().map(x=>x.path)}
 function update(){
  let n=chosen.size,picked=selectedItems();
@@ -607,7 +607,7 @@ async function editNote(td){
 	let aiLine=ai?('AI：'+ai):'';
 	let start=cur?(aiLine?(cur+'\n'+aiLine):cur):aiLine;   /* 改的时候 AI 那句也载入，方便对照；最后以你写的为准 */
 	let old=td.innerHTML;
-	td.innerHTML='<textarea class="note-edit" rows="3" spellcheck="false" autocomplete="off" title="Enter 换行 · Ctrl+Enter 或点别处保存 · Esc 取消 · 上面那行「AI：…」你可以改、可以删：留着它保存＝接受它的内容（并入你自己的话），删掉它＝不要那部分"></textarea>';
+	td.innerHTML='<textarea class="note-edit" rows="3" spellcheck="false" autocomplete="off" title="Enter 保存 · Shift+Enter 换行 · Ctrl+Enter 也保存 · Esc 取消 · 上面那行「AI：…」你可以改、可以删：留着它保存＝接受它的内容（并入你自己的话），删掉它＝不要那部分"></textarea>';
 	let inp=td.querySelector('textarea.note-edit');
 	inp.value=start;
 	inp.focus();
@@ -643,7 +643,8 @@ async function editNote(td){
 	inp.onclick=e=>e.stopPropagation();
 	inp.onblur=()=>finish(true);
 	inp.onkeydown=e=>{
-		if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();finish(true)}
+		if(e.isComposing||e.keyCode===229)return;   /* 中文输入法选词时按的回车不算保存 */
+		if(e.key==='Enter'&&!e.shiftKey&&!e.altKey){e.preventDefault();finish(true)}   /* V2.9：回车就保存；要换行请按 Shift+Enter */
 		else if(e.key==='Escape'){e.preventDefault();finish(false)}
 	};
 }
@@ -768,13 +769,60 @@ async function deleteRows(paths){
  dropItems(new Set(done.map(p=>String(p).toLowerCase())));
  alert('已移到回收站 '+done.length+' 项')
 }
+/* V2.9：设置 → 忽略名单 分成两个标签：「搜索目录」（扫描时跳过）和「AI 分析」（你动过、批量分析不再覆盖的那几格）。 */
+let settingsIgnoreTab='scan';
+const IGNORE_HINT_SCAN='名单里的项目名称在扫描时会被跳过（不删除任何文件）。想让它重新出现就点「恢复」，再点工具栏的「重新扫描」。';
+const IGNORE_HINT_AI='这些格子你自己动过（改写过，或者把「AI：…」那句删干净了），批量 AI 分析会跳过它们，你写的字一个字不动。想让 AI 再说一遍就点右边的「让 AI 重新分析」：新的「AI：…」会加在你写的话下面。';
+function ignoreTabCount(which,n){let s=el(which==='ai'?'ignoreTabAiCount':'ignoreTabScanCount');if(s)s.textContent=(typeof n==='number'&&n>0)?('（'+n+'）'):''}
+function syncIgnoreTabUI(){
+ document.querySelectorAll('.ignore-tabs .seg-btn').forEach(b=>b.classList.toggle('active',b.dataset.ignoreTab===settingsIgnoreTab));
+ let hint=el('ignoreHint');
+ if(hint)hint.textContent=settingsIgnoreTab==='ai'?IGNORE_HINT_AI:IGNORE_HINT_SCAN
+}
+function switchIgnoreTab(tab){settingsIgnoreTab=(tab==='ai')?'ai':'scan';syncIgnoreTabUI();loadIgnorePane()}
+async function refreshAiSkipCount(){
+ if(settingsIgnoreTab==='ai')return;   /* AI 那一页自己会更新计数 */
+ let api=native();
+ if(!api||typeof api.ai_skip_list!=='function'){ignoreTabCount('ai',0);return}
+ let d;try{d=await api.ai_skip_list()}catch(e){d={ok:false}}
+ ignoreTabCount('ai',(d&&d.ok&&Array.isArray(d.result))?d.result.length:0)
+}
+async function loadAiSkipPane(){
+ let body=el('ignoreBody');if(!body)return;
+ let api=native();
+ if(!api||typeof api.ai_skip_list!=='function'){ignoreTabCount('ai',0);body.innerHTML='<p class="muted">这一页仅桌面版可用。</p>';return}
+ let d;try{d=await api.ai_skip_list()}catch(e){d={ok:false,error:e.message}}
+ if(!d||!d.ok){body.innerHTML='<p class="muted">读取 AI 分析名单失败：'+esc((d&&d.error)||'未知错误')+'</p>';return}
+ let recs=Array.isArray(d.result)?d.result:[];
+ ignoreTabCount('ai',recs.length);
+ body.innerHTML=recs.length?recs.map(r=>{
+  let note=String(r.note||'').trim(),why=r.reason==='改写'?'你改写成了自己的话':'你把 AI 那句删掉了';
+  return '<div class="ignore-row ai"><span class="ignore-main"><b>'+esc(r.name||r.path)+'</b>'
+   +'<div class="ignore-meta">'+esc(why)+(r.when?' · '+esc(String(r.when).replace('T',' ')):'')+'</div>'
+   +(note?'<div class="ignore-note">'+esc(note.length>90?note.slice(0,90)+'…':note)+'</div>':'')
+   +'<div class="ignore-meta">'+esc(r.path||'')+'</div></span>'
+   +'<button class="mini" data-ai-path="'+esc(r.path||'')+'" title="只对「'+esc(r.name||r.path)+'」再问一次 AI：新的「AI：…」加在你写的话下面，你写的字一个不动">让 AI 重新分析</button></div>'
+ }).join(''):'<p class="muted">这里还空着。你在表格里改过某一格的说明（或者把「AI：…」那句删干净）保存之后，这一格就会出现在这里：批量 AI 分析默认跳过它们，不会覆盖你写的话。</p>';
+ body.querySelectorAll('button[data-ai-path]').forEach(b=>b.onclick=async()=>{
+  let path=b.dataset.aiPath;
+  if(!path)return;
+  b.disabled=true;
+  el('settingsModal').classList.remove('open');
+  let it=items.find(x=>x.path===path);
+  try{await (it?aiAnalyzePaths([path],true):enrich([path],false,true))}catch(e){toast('重新分析失败：'+((e&&e.message)||e),true)}
+  b.disabled=false;
+  if(settingsIgnoreTab==='ai')loadAiSkipPane()
+ })
+}
 async function loadIgnorePane(){
  let body=el('ignoreBody');if(!body)return;
+ syncIgnoreTabUI();
+ if(settingsIgnoreTab==='ai')return loadAiSkipPane();
  let api=native();
  if(!api||typeof api.ignored_list!=='function'){body.innerHTML='<p class="muted">忽略名单仅桌面版可用。</p>';return}
  let d;try{d=await api.ignored_list()}catch(e){d={ok:false,error:e.message}}
  if(!d||!d.ok){body.innerHTML='<p class="muted">读取忽略名单失败：'+esc((d&&d.error)||'未知错误')+'</p>';return}
- let recs=d.result||[];
+ let recs=d.result||[]; ignoreTabCount('scan',recs.length);refreshAiSkipCount();
  body.innerHTML=recs.length?recs.map(r=>'<div class="ignore-row"><span>'+esc(r.name)+(r.addedAt?'<div class="muted" style="font-size:12px">加入于 '+esc(String(r.addedAt).replace('T',' '))+'</div>':'')+'</span><button class="mini" data-name="'+esc(r.name)+'" title="把「'+esc(r.name)+'」从忽略名单里移除，重新扫描后它会再次出现">恢复</button></div>').join(''):'<p class="muted">名单是空的。在表格里右键任一项目选「忽略」，或勾选后点工具栏的「设为忽略」就能加进来。</p>';
  body.querySelectorAll('button[data-name]').forEach(b=>b.onclick=async()=>{
   let name=b.dataset.name;b.disabled=true;
@@ -919,7 +967,7 @@ el('ignore').onclick=()=>{
 };
 el('themeBtn').onclick=toggleTheme;
 el('settingsBtn').onclick=()=>openSettings(settingsPane||'model');
-document.querySelectorAll('.settings-nav .nav-item').forEach(b=>b.onclick=()=>switchSettingsPane(b.dataset.pane));
+document.querySelectorAll('.settings-nav .nav-item').forEach(b=>b.onclick=()=>switchSettingsPane(b.dataset.pane));document.querySelectorAll('.ignore-tabs .seg-btn').forEach(b=>b.onclick=()=>switchIgnoreTab(b.dataset.ignoreTab));
 document.querySelectorAll('.seg-btn[data-theme]').forEach(b=>b.onclick=()=>setThemeMode(b.dataset.theme));
 document.querySelectorAll('[data-close-settings]').forEach(b=>b.onclick=()=>el('settingsModal').classList.remove('open'));
 el('ignoreClose').onclick=()=>el('settingsModal').classList.remove('open');

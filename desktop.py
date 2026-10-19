@@ -110,6 +110,9 @@ class Api:
  def unignore(self, name):
   try: return {'ok':True,'result':server.remove_ignore(name)}
   except Exception as e: return {'ok':False,'error':str(e)}
+ def ai_skip_list(self):
+  try: return {'ok':True,'result':server.ai_skip_list()}
+  except Exception as e: return {'ok':False,'error':str(e)}
  def ignored_list(self):
   try: return {'ok':True,'result':server.load_ignore()}
   except Exception as e: return {'ok':False,'error':str(e)}
