@@ -37,6 +37,15 @@ class Api:
  def natural_search(self, query):
   try: return {'ok':True,'result':server.natural_search(query)}
   except Exception as e: return {'ok':False,'error':str(e)}
+ def ask_help(self, question):
+  """V2.3：功能问答，把功能说明全文交给 LLM（只读帮助文本，不碰用户文件）。"""
+  try: return {'ok':True,'result':server.ask_help(question)}
+  except Exception as e: return {'ok':False,'error':str(e)}
+ def kb_info(self):
+  try:
+   kb=server.kb_text()
+   return {'ok':True,'result':{'chars':kb['chars'],'tokens':kb['tokens'],'sources':kb['sources'],'version':kb['version']}}
+  except Exception as e: return {'ok':False,'error':str(e)}
  def get_settings(self):
   try: return {'ok':True,'result':server.get_settings(False)}
   except Exception as e: return {'ok':False,'error':str(e)}

@@ -255,12 +255,70 @@ function syncQa() {
 		q.placeholder = '自动问答（还没配置 LLM KEY）'
 	}
 }
+/* ---------- V2.3：功能问答（功能说明 + README 全文直传，不建索引） ---------- */
+let kbBusy = false, kbInfo = null;
+function kbMetaBase() {
+	if (!llmReady) return '还没配置 LLM KEY：配好之后这里可以直接问功能问题（比如「怎么把包永久保留」）';
+	let s = '知识库＝这一页功能说明 + README 全文，每次提问整份发过去，不建索引、装了就能用';
+	if (kbInfo && kbInfo.chars) s += '（约 ' + (kbInfo.chars / 10000).toFixed(1) + ' 万字' + (kbInfo.tokens ? ' / 约 ' + kbInfo.tokens + ' tokens' : '') + '）';
+	return s
+}
+function syncKb() {
+	let q = el('kbQ'); if (!q) return;
+	if (llmReady) {
+		q.classList.remove('kb-locked');
+		q.title = '功能问答：问一句关于这个软件怎么用的问题，按 Enter 提交（会把功能说明全文发给 DeepSeek）';
+		q.placeholder = '问一句：比如「怎么把某个包永久保留？」'
+	} else {
+		q.classList.add('kb-locked');
+		q.title = '要使用功能问答，请先到「设置 → 模型设置」中配置 LLM KEY';
+		q.placeholder = '功能问答（还没配置 LLM KEY）'
+	}
+	if (el('kbAsk')) el('kbAsk').disabled = kbBusy;
+	if (el('kbMeta')) el('kbMeta').textContent = kbMetaBase()
+}
+async function loadKbInfo() {
+	let api = native();
+	if (!api || typeof api.kb_info !== 'function') return;
+	try { let d = await api.kb_info(); if (d && d.ok) { kbInfo = d.result || null; syncKb() } } catch (_) { }
+}
+async function askKb() {
+	if (kbBusy) return;
+	let api = native(), q = el('kbQ'), box = el('kbA'), btn = el('kbAsk');
+	if (!api || typeof api.ask_help !== 'function') { toast('功能问答仅桌面版可用', true); return }
+	if (!llmReady) {
+		if (box) { box.hidden = false; box.className = 'kb-answer err'; box.textContent = '要使用功能问答，请先到「设置 → 模型设置」中配置 LLM KEY'; }
+		toast('要使用功能问答，请先到「设置 → 模型设置」中配置 LLM KEY', true);
+		return
+	}
+	let text = (q.value || '').trim();
+	if (!text) { toast('先输入想问的问题，例如「怎么把某个包永久保留」'); q.focus(); return }
+	kbBusy = true; if (btn) { btn.disabled = true; btn.textContent = '回答中…' }
+	if (box) { box.hidden = false; box.className = 'kb-answer'; box.textContent = '正在把功能说明全文发给 DeepSeek…'; }
+	if (el('kbMeta')) el('kbMeta').textContent = '功能说明全文约 ' + (kbInfo && kbInfo.chars ? (kbInfo.chars / 10000).toFixed(1) + ' 万字' : '一万多字') + '，正在请求 DeepSeek…';
+	let d;
+	try { d = await api.ask_help(text) } catch (e) { d = { ok: false, error: (e && e.message) ? e.message : String(e) } }
+	kbBusy = false; if (btn) { btn.disabled = false; btn.textContent = '提问' }
+	if (!d || !d.ok) {
+		if (box) { box.className = 'kb-answer err'; box.textContent = '没能回答：' + ((d && d.error) || '未知错误') }
+		if (el('kbMeta')) el('kbMeta').textContent = kbMetaBase();
+		return
+	}
+	let r = d.result || {}, u = r.usage || {}, bits = [];
+	if (box) { box.className = 'kb-answer'; box.textContent = r.answer || '（模型没有给出内容）' }
+	if (r.model) bits.push('模型 ' + r.model);
+	if (u.prompt) bits.push('送入 ' + u.prompt + ' tokens' + (u.cached ? '（缓存命中 ' + u.cached + '）' : ''));
+	if (u.completion) bits.push('回答 ' + u.completion + ' tokens');
+	if (r.latencyMs) bits.push((r.latencyMs / 1000).toFixed(1) + ' 秒');
+	if (r.kb && r.kb.tokens) bits.push('知识库约 ' + r.kb.tokens + ' tokens');
+	if (el('kbMeta')) el('kbMeta').textContent = bits.join(' · ')
+}
 function applySettingsState(c) {
 	if (!c) return;
 	llmReady = !!c.apiKeyMasked;
 	hideNotice = !!c.hideNotice;
 	if (el('showNotice')) el('showNotice').checked = !hideNotice;
-	syncQa(); syncNotice()
+	syncQa(); syncNotice(); syncKb()
 }
 function qaSubmit() {
 	let q = el('qa'); if (!q) return;
@@ -388,6 +446,7 @@ function switchSettingsPane(pane){
  document.querySelectorAll('.settings-body .pane').forEach(p=>{p.hidden=(p.dataset.pane!==settingsPane)});
  if(settingsPane==='ignore')loadIgnorePane();
  else if(settingsPane==='theme')syncThemeButtons();
+ else if(settingsPane==='guide'){loadKbInfo();syncKb()}
 }
 async function saveSettings(){
  let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoAnalyze:el('autoAnalyze').checked,scanAI:el('scanAI').checked,hideNotice:el('showNotice')?!el('showNotice').checked:undefined});
@@ -451,6 +510,10 @@ el('noticeClose').onclick=async()=>{
 el('showNotice').onchange=()=>{hideNotice=!el('showNotice').checked;syncNotice()};
 el('qa').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();qaSubmit()}else if(e.key==='Escape'){e.preventDefault();el('qa').value='';el('qa').blur()}};
 el('qa').onfocus=()=>{if(!llmReady)toast('要使用自动问答，请先到「设置」中配置 LLM KEY',true)};
+el('kbAsk').onclick=askKb;
+el('kbQ').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();askKb()}else if(e.key==='Escape'){e.preventDefault();el('kbQ').value='';el('kbQ').blur()}};
+el('kbQ').onfocus=()=>{if(!llmReady)toast('要使用功能问答，请先到「设置 → 模型设置」中配置 LLM KEY',true)};
+syncKb();
 syncQa();
 let started=false;async function startWhenReady(){if(started)return;let api=native();if(api&&typeof api.scan==='function'&&typeof api.enrich==='function'){started=true;el('status').textContent='原生接口已连接';try{let v=await api.app_version();if(v&&v.ok&&v.result)el('ver').textContent='V'+v.result}catch(_){}try{let gl=await api.group_list();if(gl&&gl.ok&&Array.isArray(gl.result)&&gl.result.length){scanGroups=gl.result.slice();if(!groupOf(activeGroup))activeGroup=scanGroups[0].id;renderTags();fillRootSelect();refreshCounts()}}catch(_){}await load(false);return}el('status').textContent='正在连接本机分析接口…';setTimeout(startWhenReady,200)}window.addEventListener('pywebviewready',startWhenReady);startWhenReady();
 

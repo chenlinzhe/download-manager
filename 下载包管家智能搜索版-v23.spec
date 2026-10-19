@@ -5,7 +5,7 @@ a = Analysis(
     ['desktop.py'],
     pathex=[],
     binaries=[],
-    datas=[('index.html', '.'), ('app.js', '.')],
+    datas=[('index.html', '.'), ('app.js', '.'), ('README.md', '.')],  # README 一起打包：功能问答的知识库由 index.html + README 组成
     hiddenimports=['webview.platforms.edgechromium', 'webview.platforms.winforms'],
     hookspath=[],
     hooksconfig={},
@@ -23,7 +23,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='下载包管家智能搜索版-v22',
+    name='下载包管家智能搜索版-v23',
     icon='app.ico',
     version='version_info.txt',
     debug=False,

@@ -46,6 +46,19 @@ header h1{font-size:16px;font-weight:600;margin:0;letter-spacing:.2px;white-spac
 .qa-input:focus{border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 3px var(--accent-soft)}
 .qa-input::placeholder{color:var(--fg-faint)}
 .qa-input.qa-locked{color:var(--fg-faint);cursor:help;background:var(--surface)}
+/* 功能问答：把功能说明全文交给 AI，不建索引、不额外安装任何东西 */
+.kb-ask{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);padding:12px 14px;margin:8px 0 16px}
+.kb-row{display:flex;gap:8px;align-items:center}
+.kb-input{flex:1 1 auto;min-width:0;height:34px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface);padding:0 12px;font-size:13px;color:var(--fg);outline:none}
+.kb-input:hover{border-color:var(--accent)}
+.kb-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.kb-input::placeholder{color:var(--fg-faint)}
+.kb-input.kb-locked{color:var(--fg-faint);cursor:help;background:var(--surface-2)}
+.kb-row button{flex:0 0 auto;height:34px;padding:0 16px}
+.kb-meta{margin-top:8px;font-size:12px;line-height:1.6;color:var(--fg-faint)}
+.kb-answer{margin-top:10px;padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;background:var(--surface);font-size:13px;line-height:1.7;color:var(--fg);white-space:pre-wrap;word-break:break-word}
+.kb-answer[hidden]{display:none}
+.kb-answer.err{border-left-color:var(--danger-fg);color:var(--danger-fg)}
 main{max-width:1560px;margin:0 auto;padding:20px 24px 32px}
 .notice{display:flex;gap:10px;align-items:flex-start;background:var(--info-bg);color:var(--info-fg);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius);padding:10px 14px;margin-bottom:14px;font-size:13px}
 .notice-icon{flex:none;font-size:14px;line-height:1.45}
@@ -216,7 +229,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </head>
 <body>
 <header>
- <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V2.2</span></div>
+ <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V2.3</span></div>
  <div class="qa-wrap"><input id="qa" class="qa-input" type="search" autocomplete="off" spellcheck="false" placeholder="自动问答：问一句，Enter 提交" title="要使用自动问答，请先到「设置」中配置 LLM KEY" aria-label="自动问答"></div>
  <div class="header-right">
   <span id="status">准备加载…</span>
@@ -296,7 +309,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    <button type="button" class="nav-item" data-pane="ignore" title="查看并撤销被忽略的项目名字">忽略名单</button>
    <button type="button" class="nav-item" data-pane="theme" title="跟随系统 / 浅色 / 深色">外观与主题</button>
    <button type="button" class="nav-item" data-pane="guide" title="逐条说明软件里的每个功能：扫描、建议、AI 分析、批量操作、设置">功能说明</button>
-   <div class="nav-foot">下载包管家 V2.2<br>程序不会运行任何安装包</div>
+   <div class="nav-foot">下载包管家 V2.3<br>程序不会运行任何安装包</div>
   </nav>
   <section class="settings-body">
    <div class="pane" data-pane="model">
@@ -350,6 +363,14 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    <div class="pane" data-pane="guide" hidden>
     <h2>功能说明</h2>
     <p class="hint">按平时使用的顺序，把软件里的每个功能都过一遍。软件只读文件信息，不会运行任何安装包。</p>
+    <div class="kb-ask">
+     <div class="kb-row">
+      <input id="kbQ" class="kb-input" type="search" autocomplete="off" spellcheck="false" placeholder="问一句：比如「怎么把某个包永久保留？」" title="要使用功能问答，请先到「设置 → 模型设置」中配置 LLM KEY" aria-label="功能问答">
+      <button type="button" id="kbAsk" class="primary" title="把这一页功能说明 + README 全文发给 DeepSeek，让它只按资料回答你的问题">提问</button>
+     </div>
+     <div id="kbMeta" class="kb-meta"></div>
+     <div id="kbA" class="kb-answer" hidden></div>
+    </div>
     <div class="guide">
      <h3>一、扫描：它是怎么找到下载包的</h3>
      <ul>
@@ -452,7 +473,15 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
       <li><b>不会花钱</b>：CLI 只做本地扫描与关键词匹配，不会替你调用 DeepSeek。</li>
       <li><b>输出</b>：UTF-8 的 JSON（加 <code>--pretty</code> 变成多行缩进）；出错时 <code>ok</code> 为 false、退出码非 0。</li>
      </ul>
-     <h3>十四、数据与安全</h3>
+     <h3>十四、功能问答：把功能说明全文交给 AI</h3>
+     <ul>
+      <li><b>在哪问</b>：就是这一页顶上的输入框，问一句按 <b>Enter</b>（或点「提问」）。比如「怎么把某个包永久保留」「命令行怎么用」「扫描为什么这么快」。</li>
+      <li><b>它凭什么答</b>：把这一整页「功能说明」和 README 的全文（约 1.4 万字）一次性放进提示里发给 DeepSeek，让它只按这份资料回答——没有向量库、没有索引文件、不用额外安装或部署任何东西，装着就能用。资料里没写的，它会直说「功能说明里没写」，不会瞎编。</li>
+      <li><b>要不要 Key</b>：要。没配 LLM KEY 时输入框是锁定状态，悬停会提示先去「设置 → 模型设置」填 Key，点「提问」也不会发请求。</li>
+      <li><b>花多少钱</b>：每次提问大约一万多个 token 的输入。按 deepseek-flash 现价（高峰输入 $0.3 / 百万 token）算，一次约 0.02 元；同一份资料命中缓存后近乎免费。答案下面会写明这次实际用掉的 token 与耗时。</li>
+      <li><b>它不做什么</b>：不改你的文件、不扫盘、不读你的下载包清单，只回答软件怎么用。要按内容找包，用标题行那个「自动问答」或工具栏的「智能搜索」。</li>
+     </ul>
+     <h3>十五、数据与安全</h3>
      <ul>
       <li>所有数据都在本机：扫描快照、AI 说明缓存、备注、忽略名单、保留标记、设置文件。</li>
       <li>软件不运行、不解压、不上传你的任何文件；唯一的外发内容是你主动触发的 AI 分析请求（包名 + 可选的文件清单）和智能搜索的那一句话。</li>
@@ -496,6 +525,6 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="ctxMenu" class="ctx-menu"></div>
-<script src="app.js?v=20260820-32"></script>
+<script src="app.js?v=20260820-33"></script>
 </body>
 </html>

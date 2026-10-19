@@ -10,7 +10,7 @@ if getattr(__import__('sys'),'frozen',False):
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
 GROUPS_FILE=APP/'resource_groups.json'
-APP_VERSION='2.2'
+APP_VERSION='2.3'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -608,6 +608,87 @@ def test_connection(baseUrl=None, model=None, apiKey=None):
   return {'ok':False,'error':'HTTP %s：%s'%(code,msg),'endpoint':base}
  except Exception as e:
   return {'ok':False,'error':str(e),'endpoint':base}
+
+# ---------- V2.3：功能知识库（功能说明全文直传 LLM；总共一万多 token，不建向量库，装机不用多带任何东西） ----------
+RES_DIR=Path(getattr(__import__('sys'),'_MEIPASS',Path(__file__).resolve().parent))
+KB_LOCK=threading.Lock(); KB_CACHE={'key':'','data':None}
+KB_SYSTEM=('你是「下载包管家」这款 Windows 小工具的使用帮助助手。下面【资料】里是这个软件的全部功能说明与 README。'
+ '回答时只用资料里写明的事实，不要编造资料里没有的功能、不要让用户去装别的东西；资料里没写的就直接说「功能说明里没写」，'
+ '并提示用户到「设置 → 功能说明」自己翻一下。回答用简体中文，先给结论，再给不超过 6 条要点；'
+ '凡涉及点哪里，写成「设置 → 模型设置 → 保存」这种路径形式。不要输出 Markdown 标题、不要贴大段代码。')
+def kb_guide_html(raw):
+ """从 index.html 里取出 data-pane="guide" 那一整段（按 div 嵌套计数，不硬啃正则）。"""
+ m=re.search(r'<div class="pane" data-pane="guide"',raw)
+ if not m: return ''
+ depth=1
+ for t in re.finditer(r'<div\b|</div>',raw[m.start():]):
+  depth += 1 if t.group(0)=='<div' else -1
+  if depth==0: return raw[m.start():m.start()+t.end()]
+ return raw[m.start():]
+def kb_plain(h):
+ """HTML → 纯文本：去标签、还原实体、压掉多余空白。"""
+ import html as _html
+ h=re.sub(r'<(script|style)\b.*?</\1>',' ',h,flags=re.S)
+ h=re.sub(r'<br\s*/?>','\n',h)
+ h=re.sub(r'</(p|li|h1|h2|h3|h4|div|tr)>','\n',h)
+ h=re.sub(r'<[^>]+>','',h)
+ h=_html.unescape(h)
+ h=re.sub(r'[ \t\u00a0]+',' ',h)
+ h=re.sub(r'\n{3,}','\n\n',h)
+ return h.strip()
+def kb_tokens(text):
+ """粗略估算 token：中日韩字符按 1 个算，其它字符 1.8 个算 1 个（按 cl100k 实测校准，只用于界面展示）。"""
+ cjk=sum(1 for ch in text if u'\u3400'<=ch<=u'\u9fff')
+ return cjk+int((len(text)-cjk)/1.8)+1
+def kb_text(refresh=False):
+ """拼出知识库全文：应用内「功能说明」+ README。两个文件本来就随程序打包，不用另装、不用建索引。"""
+ paths=[RES_DIR/'index.html',RES_DIR/'README.md']
+ stamp='|'.join(('%s:%s'%(p.name,p.stat().st_mtime)) if p.exists() else (p.name+':-') for p in paths)
+ with KB_LOCK:
+  if not refresh and KB_CACHE['data'] is not None and KB_CACHE['key']==stamp: return KB_CACHE['data']
+  parts=[]; sources=[]
+  if paths[0].exists():
+   try:
+    body=kb_plain(kb_guide_html(paths[0].read_text(encoding='utf-8',errors='ignore')))
+    if body: parts.append(u'【应用内「功能说明」全文】\n'+body); sources.append('index.html')
+   except OSError: pass
+  if paths[1].exists():
+   try:
+    body=paths[1].read_text(encoding='utf-8',errors='ignore').strip()
+    if body: parts.append(u'【README】\n'+body); sources.append('README.md')
+   except OSError: pass
+  text=u'\n\n'.join(parts)
+  data={'text':text,'chars':len(text),'tokens':kb_tokens(text),'sources':sources,'version':APP_VERSION}
+  KB_CACHE['key']=stamp; KB_CACHE['data']=data
+  return data
+def ask_help(question):
+ """功能问答：知识库全文放 system（固定前缀，好命中缓存），用户的问题单独发。"""
+ import urllib.request, urllib.error
+ q=str(question or '').strip()
+ if not q: raise ValueError('请先输入想问的问题')
+ q=q[:600]
+ cfg=get_settings(True); key=cfg.get('apiKey','')
+ if not key: raise ValueError(u'尚未配置 DeepSeek API Key，请到「设置 → 模型设置」填好并保存后再问')
+ kb=kb_text()
+ if not kb['text']: raise ValueError(u'没读到功能说明内容（打包时漏了 index.html / README.md）')
+ base=(cfg.get('baseUrl') or 'https://api.deepseek.com').strip().rstrip('/')
+ model=cfg.get('model') or DEFAULT_MODEL
+ messages=[{'role':'system','content':KB_SYSTEM+u'\n\n【资料】\n'+kb['text']},{'role':'user','content':q}]
+ body=json.dumps({'model':model,'messages':messages,'temperature':0.2,'max_tokens':900,'stream':False}).encode()
+ req=urllib.request.Request(base+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
+ t0=time.time()
+ try: raw=urllib.request.urlopen(req,timeout=60).read().decode('utf-8')
+ except Exception as e: raise RuntimeError(_llm_error(e,key,model))
+ try:
+  data=json.loads(raw)
+  answer=(data['choices'][0]['message']['content'] or '').strip()
+  usage=data.get('usage') or {}
+ except (KeyError,IndexError,ValueError,TypeError) as e: raise RuntimeError(u'DeepSeek 返回内容无法解析：'+str(e)[:120])
+ if not answer: raise RuntimeError(u'DeepSeek 这次没给出回答，请再问一次')
+ return {'answer':answer,'question':q,'model':data.get('model') or model,'latencyMs':int((time.time()-t0)*1000),
+  'usage':{'prompt':usage.get('prompt_tokens'),'completion':usage.get('completion_tokens'),
+   'cached':(usage.get('prompt_tokens_details') or {}).get('cached_tokens')},
+  'kb':{'chars':kb['chars'],'tokens':kb['tokens'],'sources':kb['sources'],'version':kb['version']}}
 
 def item_fingerprint(item): return '|'.join([item['name'].lower(),str(item['size']),item['modified']])
 

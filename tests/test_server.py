@@ -1042,6 +1042,98 @@ class TestNoticeSetting(TempApp):
         self.assertFalse(server.get_settings(False)['hideNotice'])
 
 
+class TestHelpKb(TempApp):
+    """V2.3：功能问答——功能说明 + README 全文直传 LLM，不建索引、不需要额外部署。"""
+
+    def setUp(self):
+        super().setUp()
+        self.env = FakeEnv()
+        self._set_env = server.set_user_env_key
+        self._env_key = server.env_api_key
+        server.set_user_env_key = self.env
+        server.env_api_key = lambda: self.env.stored.get(server.ENV_KEY_NAME, '')
+        self._urlopen = urllib.request.urlopen
+        self.sent = []
+
+    def tearDown(self):
+        urllib.request.urlopen = self._urlopen
+        server.set_user_env_key = self._set_env
+        server.env_api_key = self._env_key
+        super().tearDown()
+
+    def _stub(self, answer=u'先给结论：在工具栏点「标为保留」。', tokens=(11000, 40, 9000)):
+        class Resp(object):
+            def __init__(self, payload):
+                self._b = json.dumps(payload).encode('utf-8')
+
+            def read(self):
+                return self._b
+
+        def fake(req, timeout=None):
+            self.sent.append(json.loads(req.data.decode('utf-8')))
+            return Resp({'model': 'deepseek-flash',
+                         'choices': [{'message': {'role': 'assistant', 'content': answer}}],
+                         'usage': {'prompt_tokens': tokens[0], 'completion_tokens': tokens[1],
+                                   'prompt_tokens_details': {'cached_tokens': tokens[2]}}})
+        urllib.request.urlopen = fake
+
+    def test_kb_text_has_guide_and_readme(self):
+        kb = server.kb_text(True)
+        self.assertTrue(kb['text'], u'知识库不能是空的')
+        self.assertIn(u'一、扫描', kb['text'], u'应用内功能说明要能抽出来')
+        self.assertIn(u'功能问答', kb['text'])
+        self.assertIn(u'开源协议', kb['text'], u'README 也要进来')
+        self.assertIn('index.html', kb['sources'])
+        self.assertGreater(kb['chars'], 8000)
+        self.assertGreater(kb['tokens'], 4000)
+        self.assertEqual(kb['version'], server.APP_VERSION)
+
+    def test_kb_text_is_cached(self):
+        a = server.kb_text()
+        b = server.kb_text()
+        self.assertIs(a, b, u'同一份文件不该反复重算')
+
+    def test_ask_help_needs_key(self):
+        with self.assertRaises(ValueError) as ctx:
+            server.ask_help(u'怎么标记保留')
+        self.assertIn(u'API Key', str(ctx.exception), u'提示要说清是缺 API Key')
+        self.assertIn(u'模型设置', str(ctx.exception), u'并且告诉用户去哪填')
+        self.assertEqual(self.sent, [], u'没 Key 时不该发请求')
+
+    def test_ask_help_rejects_empty_question(self):
+        self.env.stored[server.ENV_KEY_NAME] = 'sk-' + 'a' * 32
+        with self.assertRaises(ValueError):
+            server.ask_help('   ')
+
+    def test_ask_help_sends_full_kb_and_returns_answer(self):
+        self.env.stored[server.ENV_KEY_NAME] = 'sk-' + 'a' * 32
+        self._stub()
+        out = server.ask_help(u'怎么把某个包永久保留？')
+        self.assertEqual(len(self.sent), 1)
+        msgs = self.sent[0]['messages']
+        self.assertEqual(msgs[0]['role'], 'system')
+        self.assertEqual(msgs[-1]['role'], 'user')
+        self.assertEqual(msgs[-1]['content'], u'怎么把某个包永久保留？')
+        kb = server.kb_text()
+        self.assertIn(kb['text'][:200], msgs[0]['content'], u'system 里必须是知识库全文')
+        self.assertGreater(len(msgs[0]['content']), kb['chars'] * 0.9, u'全文直传，不能只塞摘要')
+        self.assertIn(u'标为保留', out['answer'])
+        self.assertEqual(out['usage']['prompt'], 11000)
+        self.assertEqual(out['usage']['cached'], 9000)
+        self.assertEqual(out['kb']['chars'], kb['chars'])
+
+    def test_ask_help_reports_http_error_friendly(self):
+        self.env.stored[server.ENV_KEY_NAME] = 'sk-' + 'a' * 32
+
+        def raise_401(req, timeout=None):
+            raise urllib.error.HTTPError(req.full_url, 401, 'Unauthorized', {},
+                                         io.BytesIO(b'{"error":{"message":"Auth Fails"}}'))
+        urllib.request.urlopen = raise_401
+        with self.assertRaises(RuntimeError) as ctx:
+            server.ask_help(u'扫描怎么这么快')
+        self.assertIn('401', str(ctx.exception))
+
+
 class TestCli(TempApp):
     """V2.2：命令行入口给 GPT / dsh 等外部工具读数据，默认只读快照、不扫描、不联网。"""
 
