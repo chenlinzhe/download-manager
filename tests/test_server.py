@@ -365,13 +365,23 @@ class TestLlmError(unittest.TestCase):
 
 
 class TestNotes(TempApp):
-    """这一格的说明：用户在 AI 原话上改 / 补的文字要能存下来、参与搜索，且不动 AI 说明本身。"""
+    """这一格的说明：你写的字原样存、可以多行、参与搜索，且不动 AI 说明本身。"""
 
     def test_save_and_reload(self):
         path = 'D:\\Downloads\\tool.zip'
         r = server.save_note(path, u'  给小李用  \n 别删 ')
-        self.assertEqual(r['note'], u'给小李用 别删')
-        self.assertEqual(server.load_notes()[path], u'给小李用 别删')
+        self.assertEqual(r['note'], u'给小李用\n别删', u'换行保留，行内多余空格收成一个')
+        self.assertEqual(server.load_notes()[path], u'给小李用\n别删')
+
+    def test_multiline_note_keeps_every_line(self):
+        path = 'D:\\Downloads\\multi.zip'
+        r = server.save_note(path, u'第一行\r\n\r\n 第二行 \r\n\r\n')
+        self.assertEqual(r['note'], u'第一行\n\n第二行', u'空行保留，首尾空行去掉')
+
+    def test_fold_note_normalises_whitespace(self):
+        self.assertEqual(server.fold_note(u'  a\tb  '), u'a b')
+        self.assertEqual(server.fold_note(''), '')
+        self.assertEqual(server.fold_note(None), '')
 
     def test_empty_note_removes(self):
         path = 'D:\\Downloads\\tool.zip'
@@ -646,6 +656,43 @@ class TestArchiveEntries(unittest.TestCase):
         prompt = server.description_prompt({'name': 'tool.zip'})
         self.assertIn('tool.zip', prompt)
         self.assertNotIn(u'压缩包', prompt)
+        self.assertNotIn(u'深', prompt, u'不带 deep 时不该让 AI 深挖')
+
+    def test_dir_entry_list_reads_subdirectories(self):
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / 'bin').mkdir()
+            (Path(td) / 'bin' / 'tool.exe').write_text('x')
+            (Path(td) / 'readme.txt').write_text('x')
+            names = server.dir_entry_list(td)
+            self.assertIn('bin/', names, u'目录要带斜杠标出来')
+            self.assertIn('bin/tool.exe', names, u'子目录里的文件也要列')
+            self.assertIn('readme.txt', names)
+            self.assertEqual(server.dir_entry_list(str(Path(td) / 'nope')), [])
+            self.assertEqual(server.dir_entry_list(''), [])
+
+    def test_deep_prompt_digs_into_subdirectories(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / 'SomePackage'
+            (root / 'bin').mkdir(parents=True)
+            (root / 'bin' / 'tool.exe').write_text('x')
+            (root / 'train.py').write_text('x')
+            shallow = server.description_prompt({'name': 'SomePackage', 'path': str(root)})
+            deep = server.description_prompt({'name': 'SomePackage', 'path': str(root)}, True)
+            self.assertNotIn('tool.exe', shallow, u'不深挖时不该读目录内容')
+            self.assertIn('tool.exe', deep, u'深挖要读到子目录里的文件')
+            self.assertIn('train.py', deep)
+            self.assertIn(u'不满意', deep, u'深挖要让 AI 换个角度看')
+
+    def test_deep_prompt_reads_more_archive_entries(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / 'big.zip'
+            with zipfile.ZipFile(str(p), 'w') as z:
+                for i in range(60):
+                    z.writestr('dir%d/file%d.txt' % (i, i), 'x')
+            shallow = server.description_prompt({'name': 'big.zip', 'path': str(p)})
+            deep = server.description_prompt({'name': 'big.zip', 'path': str(p)}, True)
+            self.assertGreater(len(deep), len(shallow), u'深挖要交给 AI 更多条目')
 
 
 class TestEnrichForce(TempApp):
@@ -664,8 +711,11 @@ class TestEnrichForce(TempApp):
         self._desc = server.deepseek_description
         self.calls = []
 
-        def fake_desc(item):
+        self.deeps = []
+
+        def fake_desc(item, deep=False):
             self.calls.append(item['path'])
+            self.deeps.append(bool(deep))
             return {'summary': u'第%d次分析的说明' % len(self.calls)}
         server.deepseek_description = fake_desc
         self.old = {'summary': u'很久以前的说明',
@@ -713,6 +763,35 @@ class TestEnrichForce(TempApp):
         out = server.enrich_items([self.items[0]['path'], self.items[1]['path']])
         self.assertEqual(self.calls, [self.items[1]['path']])
         self.assertEqual(len(out['result']), 2)
+
+    def test_item_with_your_note_is_skipped(self):
+        """你标注过的项目，批量分析时跳过，你的话不能被覆盖。"""
+        server.save_note(self.items[1]['path'], u'我自己写的说明')
+        out = server.enrich_items([self.items[0]['path'], self.items[1]['path']])
+        self.assertEqual(self.calls, [], u'你标注过的项目不该再问 AI')
+        self.assertEqual(out['skipped'], 1)
+        self.assertNotIn(self.items[1]['path'], out['result'])
+        self.assertEqual(server.load_notes()[self.items[1]['path']], u'我自己写的说明')
+
+    def test_force_still_redoes_noted_item(self):
+        """按住 Shift（force）是你明确要求，标注过的也照样重做。"""
+        server.save_note(self.items[1]['path'], u'旧标注')
+        out = server.enrich_items([self.items[1]['path']], True)
+        self.assertEqual(self.calls, [self.items[1]['path']])
+        self.assertEqual(out['skipped'], 0)
+
+    def test_deep_reruns_and_tells_ai_to_dig(self):
+        out = server.enrich_items([self.items[0]['path']], False, True)
+        self.assertEqual(self.calls, [self.items[0]['path']], u'深挖要忽略缓存再问一次')
+        self.assertEqual(self.deeps, [True], u'deep 要传到 deepseek_description')
+        self.assertTrue(out['deep'])
+
+    def test_deep_redoes_even_if_you_noted_it(self):
+        """单独分析 + 你确认继续＝重做，不受「标注过就跳过」影响。"""
+        server.save_note(self.items[1]['path'], u'旧标注')
+        out = server.enrich_items([self.items[1]['path']], False, True)
+        self.assertEqual(self.calls, [self.items[1]['path']])
+        self.assertEqual(out['result'][self.items[1]['path']]['summary'], u'第1次分析的说明')
 
 
 # -*- coding: utf-8 -*-

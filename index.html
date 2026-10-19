@@ -163,10 +163,8 @@ td.llm{min-width:300px;max-width:400px;cursor:text}
 .ai{padding:6px 8px;background:var(--accent-soft);border-radius:var(--radius-sm);color:var(--info-fg);font-size:13px}
 .ai-when{margin-left:6px;font-size:12px;font-weight:400;color:var(--fg-faint);white-space:nowrap}
 .mynote{margin-top:5px;padding:2px 8px;background:var(--warn-bg);border-radius:var(--radius-sm);color:var(--warn-fg);font-size:12px}
-.note-hint{margin-top:5px;font-size:11px;color:var(--fg-faint)}
-.note-edit{width:100%;font:inherit;font-size:13px;border:1px solid var(--accent);border-radius:var(--radius-sm);padding:5px 8px;background:var(--surface);color:var(--fg);resize:none}
-.ai.mine{background:var(--warn-bg);color:var(--warn-fg)}
-.ai-orig-box{margin-top:4px;background:var(--surface-2);color:var(--fg-muted);border:1px dashed var(--border-strong)}
+.note-edit{width:100%;font:inherit;font-size:13px;line-height:1.45;border:1px solid var(--accent);border-radius:var(--radius-sm);padding:5px 8px;background:var(--surface);color:var(--fg);resize:vertical;min-height:52px;white-space:pre-wrap}
+.ai.mine{background:var(--warn-bg);color:var(--warn-fg);white-space:pre-wrap}
 .modal{display:none;position:fixed;inset:0;z-index:60;background:rgba(17,24,39,.45);align-items:center;justify-content:center;padding:20px}
 html.dark .modal{background:rgba(0,0,0,.66)}
 .modal.open{display:flex}
@@ -234,7 +232,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </head>
 <body>
 <header>
- <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V2.5</span></div>
+ <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V2.6</span></div>
  <div class="qa-wrap"><input id="qa" class="qa-input" type="search" autocomplete="off" spellcheck="false" placeholder="自动问答：问一句，Enter 提交" title="要使用自动问答，请先到「设置」中配置 LLM KEY" aria-label="自动问答"></div>
  <div class="header-right">
   <span id="status">准备加载…</span>
@@ -293,7 +291,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    <thead><tr>
     <th style="width:36px"><input type="checkbox" id="all" aria-label="全选"></th>
     <th class="sortable" data-sort="name">包 / 路径</th>
-    <th class="sortable" data-sort="ai" title="AI 说明：勾选这一行后点工具栏的「AI 分析」，DeepSeek 会用一句话讲清这是什么包，没分析过显示「--」。AI 说得不准、或不完整？直接点这一格就能在它的原话上改，或者接着补充——改完这一格显示的就是你的版本，AI 原话紧跟在下面、标着「AI 原话：」，一眼就能对照。不点「AI 分析」就不会联网。">AI 说明：这是个什么包</th>
+    <th class="sortable" data-sort="ai" title="AI 说明：勾选这一行后点工具栏的「AI 分析」，DeepSeek 一句话讲清这是什么包；没分析过显示「--」。点这一格可以直接改，AI 的话会一起载入，保存后以你写的为准。不点「AI 分析」就不会联网。">AI 说明：这是个什么包</th>
     <th class="sortable" data-sort="rec">建议</th>
     <th class="sortable" data-sort="score">价值分</th>
     <th class="sortable" data-sort="size" title="大小与文件数不含 node_modules、.git、venv 这类依赖与缓存目录（只按一个目录算，不逐个文件数），所以大项目也会很快扫完">大小</th>
@@ -314,7 +312,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
    <button type="button" class="nav-item" data-pane="ignore" title="查看并撤销被忽略的项目名字">忽略名单</button>
    <button type="button" class="nav-item" data-pane="theme" title="跟随系统 / 浅色 / 深色">外观与主题</button>
    <button type="button" class="nav-item" data-pane="guide" title="逐条说明软件里的每个功能：扫描、建议、AI 分析、批量操作、设置">功能说明</button>
-   <div class="nav-foot">下载包管家 V2.5<br>程序不会运行任何安装包</div>
+   <div class="nav-foot">下载包管家 V2.6<br>程序不会运行任何安装包</div>
   </nav>
   <section class="settings-body">
    <div class="pane" data-pane="model">
@@ -413,7 +411,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
      <ul>
       <li><b>勾选框</b>：勾上后才能用右侧按钮批量操作；表头那个勾是全选 / 全不选。</li>
       <li><b>包 / 路径</b>：名称、所在目录（点一下直接在资源管理器里打开）、类型和文件数；本次扫描新出现的项目带「新增」徽章。</li>
-      <li><b>AI 说明：这是个什么包</b>：DeepSeek 生成的一句话说明，后面用小字标「多久前分析的」。<b>AI 说得不准或不完整，直接点这一格就能改</b>：格子里预填的就是现在显示的那句话，你在原话上修改或接着补充，回车保存后<b>你的版本显示在上面</b>，AI 原话紧跟在下面并标着「AI 原话：」，两边一眼就能对照。</li>
+      <li><b>AI 说明：这是个什么包</b>：一句话说明，AI 说的前面标「<b>AI：</b>」，后面用小字标「多久前分析的」。<b>说得不准就直接点这一格改</b>：改完这一格原样显示你写的字，不加任何标签；再点进去时 AI 那句会一起载入，以你最终改的为准。</li>
       <li><b>建议</b>：保留（手工）／建议保留／待确认／不用保住。手工保留的徽章旁带一个小 ✕，点它就能取消保留。</li>
       <li><b>价值分</b>：0 到 100 的留用价值，越低越该清理（38 分以下为「不用保住」，65 分以上为「建议保留」）。</li>
       <li><b>大小</b>、<b>时间</b>：体积与最近修改日期，下面小字是「多少天前」。</li>
@@ -429,7 +427,7 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
       <li><b>哪些项目要分析</b>：点右侧「AI 分析」时，有勾选就只分析勾选的；一个都没勾就分析所有还缺说明的项目。设置里的「立即 AI 分析」是同一个意思。</li>
       <li><b>为什么一点就完成</b>：不是有时限，而是<b>命中缓存</b>。分析结果按「文件名 + 大小 + 修改时间」存档，文件没变就直接复用，不会再去请求 AI，所以看起来是秒完成的。</li>
       <li><b>会告诉你多久前分析过</b>：左侧信息条会写「这 N 项 X 分钟前分析过，文件没变，不用再分析」；每个单元格里也有「X 分钟前」的小字，鼠标悬停能看到具体时间和所用的模型。</li>
-      <li><b>想重做</b>：按住 <kbd>Shift</kbd> 点「AI 分析」会忽略缓存重新问一遍；右键菜单里的「AI 分析」同样是强制重做。文件本身变了（大小或修改时间不同）会自动当成新包重新分析，不需要强制。</li>
+      <li><b>想重做</b>：按住 <kbd>Shift</kbd> 点「AI 分析」会忽略缓存重新问一遍。你标注过的项目默认跳过；只勾选它一个再点「AI 分析」，会先问一句是否继续，确认后重做并<b>深挖子目录</b>（目录里各层文件和压缩包里的更多条目一起交给 AI）。文件本身变了（大小或修改时间不同）会自动当成新包重新分析。</li>
       <li><b>不会自己乱跑</b>：只有你点「AI 分析」「立即 AI 分析」「智能搜索」，或者打开了「启动时自动分析」时才会调用接口；那个开关默认是关的。<b>扫描本身不调用 AI</b>——判断「这个目录是不是多个包的集合」默认走本地规则 + 以前缓存的结论；想在扫描时也让 AI 判断，去设置里勾「扫描时用 AI 判断目录是否该展开」（默认关闭）。</li>
       <li><b>没有 Key 也能用</b>：没配置 Key 时「AI 说明」列显示「--」，其余功能（清理建议、保留、转移、回收站、改说明）照常工作。</li>
      </ul>
@@ -454,15 +452,16 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
      </ul>
      <h3>九、改掉 AI 的说明（你说了算）</h3>
      <ul>
-      <li><b>为什么要能改</b>：AI 只看文件名、大小、时间和压缩包里的清单，遇到名字含糊的包（比如 <code>setup_v2.exe</code>）可能说错，也可能只说一半。</li>
-      <li><b>怎么改</b>：点「AI 说明：这是个什么包」这一格（或右键 →「改这一格的说明」）。格子里<b>已经预填了现在显示的那句话</b>：错的地方直接删改，不完整就在后面接着写，按 Enter 或点别处保存，Esc 放弃。</li>
-      <li><b>改完是什么样</b>：这一格上面是「我的说明：你写的话」，下面紧跟一行小字「AI 原话：…」（带生成时间），两个排在一起，哪句是你的、哪句是 AI 的一目了然。</li>
-      <li><b>想恢复 AI 的说法</b>：再点这一格，把内容清空后回车即可；改回与 AI 原话一模一样的文字也会自动恢复。</li>
-      <li>最多 400 字（单行）。你的版本存在本机 <code>user_notes.json</code>，随扫描一直保留，也会被搜索框匹配到；重新做 AI 分析不会覆盖你改过的版本。</li>
+      <li><b>为什么能改</b>：AI 只看文件名、大小、时间和压缩包里的清单，名字含糊的包（比如 <code>setup_v2.exe</code>）可能说错、可能只说一半。</li>
+      <li><b>怎么改</b>：点「AI 说明」这一格（或右键 →「改这一格的说明」）。框里已经载入 AI 那句（前面标「AI：」），在它上面改、或直接在下面接着写自己的话；<kbd>Enter</kbd> 换行，<kbd>Ctrl</kbd>+<kbd>Enter</kbd> 或点别处保存，<kbd>Esc</kbd> 放弃。</li>
+      <li><b>改完是什么样</b>：格子只显示你写的字，原样呈现、不加标签；写了多行就按行显示。</li>
+      <li><b>想恢复 AI 的说法</b>：再点这一格，把内容清空后保存即可；只留下 AI 那一行也一样恢复。</li>
+      <li><b>重新分析会跳过你改过的</b>：批量点「AI 分析」时，你标注过的项目不动，信息条会写「另 N 项已跳过」。只有单独分析这一项、而它已经有你的标注，才会先问一句「是否继续」——确认后重新分析，并<b>深挖子目录内容</b>。</li>
+      <li>最多 400 字，可以多行。你的版本存在本机 <code>user_notes.json</code>，随扫描一直保留，也会被搜索框匹配到。</li>
      </ul>
      <h3>十、右键菜单</h3>
      <ul>
-      <li>任意一行右键可选：AI 分析（强制重做）、改这一格的说明、标为保留、取消保留、忽略、打开所在目录、转移到其他目录、移到回收站。</li>
+      <li>任意一行右键可选：AI 分析、改这一格的说明、标为保留、取消保留、忽略、打开所在目录、转移到其他目录、移到回收站。</li>
       <li>多选后右键，菜单里会显示「N 项」，除「改说明」和「打开目录」（只能单行用）之外都可以批量操作。</li>
      </ul>
      <h3>十一、设置里另外三页</h3>
@@ -551,6 +550,6 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="ctxMenu" class="ctx-menu"></div>
-<script src="app.js?v=20260820-35"></script>
+<script src="app.js?v=20260820-36"></script>
 </body>
 </html>

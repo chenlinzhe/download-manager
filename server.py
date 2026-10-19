@@ -10,7 +10,7 @@ if getattr(__import__('sys'),'frozen',False):
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
 GROUPS_FILE=APP/'resource_groups.json'
-APP_VERSION='2.5'
+APP_VERSION='2.6'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -744,18 +744,47 @@ def archive_entry_list(path,limit=24):
   cleaned.append(n if len(n)<=60 else n[:57]+u'\u2026')
  return cleaned
 
-def description_prompt(item):
+def dir_entry_list(path,limit=60,depth=3):
+ """只读目录里的内容清单（含子目录，最多 depth 层），留给「重做分析」时深挖用；读不到就返回空列表。"""
+ if not path: return []
+ p=Path(path)
+ try:
+  if not p.is_dir(): return []
+ except OSError: return []
+ names=[]
+ def walk(d,prefix,level):
+  if len(names)>=limit or level>depth: return
+  try: entries=sorted(list(os.scandir(str(d))),key=lambda e:(not e.is_dir(follow_symlinks=False),e.name.lower()))
+  except OSError: return
+  for e in entries:
+   if len(names)>=limit: return
+   try: isdir=e.is_dir(follow_symlinks=False)
+   except OSError: isdir=False
+   names.append(prefix+e.name+(u'/' if isdir else u''))
+   if isdir: walk(Path(e.path),prefix+e.name+u'/',level+1)
+ walk(p,u'',1)
+ return [n if len(n)<=60 else n[:57]+u'\u2026' for n in names]
+
+def description_prompt(item,deep=False):
  prompt=('根据下载包名判断这是什么。只返回严格JSON：{"summary":"10至15个中文字的简短描述"}。'
          '必须给出最可能判断，不能回答无法确认或复述文件名。包名：%s')%item.get('name','')
- inside=archive_entry_list(item.get('path'))
+ inside=archive_entry_list(item.get('path'),80 if deep else 24)
  if inside: prompt+='；压缩包里主要有这些文件：'+'、'.join(inside)
+ elif deep:
+  sub=dir_entry_list(item.get('path'),60)
+  if sub: prompt+='；这个包里（含子目录）主要有：'+'、'.join(sub)
+ if deep:
+  # 用户已经标注过还是要求重做＝对上一次的说明不满意，让他往深里看子目录和内部结构
+  prompt+=('；这一项用户看过并标注过，但对你这次的说明不满意，请你重新判断、往深处看：'
+           '结合上面列出的子目录和文件清单、名称里的版本号与关键字，讲清它究竟是什么、做什么用、'
+           '值得注意什么（安装包 / 驱动 / 数据集 / 源码 / 运行库等），10至20个中文字以内，不要复述文件名。')
  return prompt
 
-def deepseek_description(item):
+def deepseek_description(item,deep=False):
  import urllib.request
  cfg=get_settings(True); key=cfg.get('apiKey','')
  if not key: raise ValueError('尚未配置 DeepSeek API Key，请打开「模型设置」填写。')
- prompt=description_prompt(item)
+ prompt=description_prompt(item,deep)
  body=json.dumps({'model':cfg['model'],'messages':[{'role':'user','content':prompt}],'temperature':0.1,'response_format':{'type':'json_object'}}).encode()
  req=urllib.request.Request(cfg['baseUrl']+'/chat/completions',data=body,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
  try: response=json.loads(urllib.request.urlopen(req,timeout=30).read().decode('utf-8'))
@@ -765,8 +794,8 @@ def deepseek_description(item):
   return json.loads(content)
  except (KeyError,IndexError,ValueError) as e: raise RuntimeError('DeepSeek 返回内容无法解析：'+str(e)[:120])
 
-def enrich_items(paths, force=False):
- wanted=set(paths); cache=load_json_file(AI_CACHE_FILE,{})
+def enrich_items(paths, force=False, deep=False):
+ wanted=set(paths); cache=load_json_file(AI_CACHE_FILE,{}); notes=load_notes(); skipped=0
  # Reuse the most recent scan. The old implementation rescanned every drive for
  # every package, which made the UI appear stuck.
  with LOCK: cached_items=list(CACHE.get('items',[]))
@@ -775,11 +804,15 @@ def enrich_items(paths, force=False):
  results={}; errors={}; pending=[]
  for item in targets:
   fp=item_fingerprint(item)
-  # force=True：用户按住 Shift 明确要求重做，忽略缓存再问一遍 AI
-  if fp in cache and not force: results[item['path']]=cache[fp]
+  # V2.6：你已经标注过这一格＝以你的版本为准，批量分析时直接跳过，不花额度也不覆盖你的话；
+  # deep（单独确认过的重做）和 force（按住 Shift）是你明确要求，照做。
+  if not force and not deep and str(notes.get(item['path']) or '').strip():
+   skipped+=1; continue
+  # force / deep：你明确要求重做，忽略缓存再问一遍 AI
+  if fp in cache and not force and not deep: results[item['path']]=cache[fp]
   else: pending.append(item)
  def ask(item):
-  desc=deepseek_description(item)
+  desc=deepseek_description(item,deep)
   desc={'summary':str(desc.get('summary','')).strip()[:30],
         'searchedAt':datetime.now().isoformat(timespec='seconds'),
         'model':get_settings(True)['model']}
@@ -794,7 +827,7 @@ def enrich_items(paths, force=False):
     _,desc=future.result(); cache[item_fingerprint(item)]=desc; results[item['path']]=desc
    except Exception as e: errors[item['path']]=str(e)
  if pending: save_json_file(AI_CACHE_FILE,cache)
- return {'ok':not errors,'result':results,'errors':errors}
+ return {'ok':not errors,'result':results,'errors':errors,'skipped':skipped,'deep':bool(deep)}
 
 def collection_signature(p):
  try:
@@ -889,12 +922,20 @@ def load_notes():
   return data if isinstance(data,dict) else {}
  except (OSError,json.JSONDecodeError): return {}
 
+def fold_note(text):
+ """把用户写的说明收成存下来的样子：换行保留（格子按多行原样显示），行内多余空白收成一个空格。"""
+ raw=str(text or '').replace('\r\n','\n').replace('\r','\n')
+ lines=[' '.join(line.split()) for line in raw.split('\n')]
+ while lines and not lines[0]: lines.pop(0)
+ while lines and not lines[-1]: lines.pop()
+ return '\n'.join(lines)[:400]
+
 def save_note(path, text):
- """保存用户改过 / 补过的说明（按包路径存，最多 400 字；留空即删除，等于恢复 AI 原话）。
- 这一格显示的就是它：用户在 AI 原话上改，改完以用户的版本为准，AI 原话另存于 aiDescription 里供对照。"""
+ """保存用户改过 / 补过的说明（按包路径存，最多 400 字，可以多行；留空即删除，等于恢复 AI 的说明）。
+ 格子显示的就是它，原样呈现、不加标签，以用户的版本为准。"""
  notes=load_notes(); key=str(path or '')
  if not key: raise ValueError('缺少包路径')
- note=' '.join(str(text or '').split())[:400]
+ note=fold_note(text)
  if note: notes[key]=note
  else: notes.pop(key,None)
  tmp=NOTES_FILE.with_suffix('.tmp')

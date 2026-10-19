@@ -145,21 +145,15 @@ async function renameGroup(gid){
  input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();finish(true)}else if(e.key==='Escape'){e.preventDefault();finish(false)}};
  input.onblur=()=>finish(true);
 }
-/* V2.5：这一格显示的就是「这一项的说明」。AI 说得不准或不完整，直接在它的原话上改 / 补充；
-   改完你的版本排在前面，AI 原话跟在下面并标「AI 原话：」，一眼能对照 */
+/* V2.6：这一格只说一句话——你写的原样显示（不加任何标签），AI 说的前面标「AI：」 */
 function aiBox(x){
 	let a=x.aiDescription,sum=(a&&a.summary)?String(a.summary):'',note=String(x.note||'').trim();
-	let when=(sum&&a.searchedAt)?'<span class="ai-when" title="这段 AI 原话生成于 '+esc(String(a.searchedAt).replace('T',' '))+(a.model?'（'+esc(a.model)+'）':'')+'">'+esc(whenAgo(a.searchedAt))+'</span>':'';
-	let hint='<div class="note-hint">✎ 点这一格可以改 / 补充这句说明</div>';
-	if(note){
-		let mine='<div class="ai mine"><b>我的说明：</b>'+esc(note)+'</div>';
-		let orig=sum?('<div class="ai ai-orig-box"><b>AI 原话：</b>'+esc(sum)+when+'</div>'):'';
-		return mine+orig+hint
-	}
-	if(sum)return '<div class="ai"><b>这是：</b>'+esc(sum)+when+'</div>'+hint;
-	return '<span class="muted" title="还没有 AI 说明：勾选这一行后点工具栏的「AI 分析」，DeepSeek 会用一句话讲清这是什么包；不点就不会联网。也可以直接点这一格写下你自己的说明。">--</span>'+hint
+	let when=(sum&&a.searchedAt)?'<span class="ai-when" title="AI 这段说明生成于 '+esc(String(a.searchedAt).replace('T',' '))+(a.model?'（'+esc(a.model)+'）':'')+'">'+esc(whenAgo(a.searchedAt))+'</span>':'';
+	if(note)return '<div class="ai mine">'+esc(note)+'</div>';
+	if(sum)return '<div class="ai"><b>AI：</b>'+esc(sum)+when+'</div>';
+	return '<span class="muted" title="还没有说明：勾选这一行后点工具栏的「AI 分析」，或者直接点这一格自己写。">--</span>'
 }
-function render(){let v=visible();el('body').innerHTML=v.length?v.map(x=>'<tr data-path="'+esc(x.path)+'"><td><input class="pick" type="checkbox" data-id="'+esc(x.id)+'" '+(chosen.has(x.id)?'checked':'')+'></td><td><div class="name">'+esc(x.displayName||x.name)+(x.isNew?' <span class="new">新增</span>':'')+'</div><button class="path open-path" data-path="'+esc(x.parentPath||x.path)+'" title="打开包所在目录">所在目录：'+esc(x.parentPath||x.path)+'</button><div class="muted">'+esc(x.kind)+' · '+x.files+' 文件</div></td><td class="llm" data-path="'+esc(x.path)+'" title="点一下就能改 / 补充这句说明：AI 说得不准或不完整，直接在它的原话上改，改完以你的版本为准">'+aiBox(x)+'</td><td><span class="badge '+cls(x.recommendation)+'">'+x.recommendation+(x.manualKeep?'<button class="badge-x" data-unkeep="'+esc(x.path)+'" title="取消保留（按实际情况重新评估）">✕</button>':'')+'</span></td><td><b>'+x.score+'</b></td><td>'+fmt(x.size)+'</td><td>'+esc(x.modified.slice(0,10))+'<div class="muted">'+x.ageDays+' 天前</div></td><td>'+esc(x.redownload)+'</td><td class="'+(x.suspicious?'warn':'')+'">'+esc(x.registration)+'</td><td class="why">'+x.reasons.map(esc).join('；')+'</td></tr>').join(''):'<tr><td colspan="10" class="empty">没有符合筛选条件的项目</td></tr>';document.querySelectorAll('.open-path').forEach(e=>e.onclick=async()=>{let d=await native().open_path(e.dataset.path);if(!d.ok)alert(d.error)});document.querySelectorAll('button.badge-x').forEach(b=>b.onclick=e=>{e.stopPropagation();unkeepRows([b.dataset.unkeep])});document.querySelectorAll('td.llm').forEach(td=>td.onclick=()=>editNote(td));document.querySelectorAll('.pick').forEach(e=>e.onchange=()=>{e.checked?chosen.add(e.dataset.id):chosen.delete(e.dataset.id);update()});update()}function selectedItems(){return items.filter(x=>chosen.has(x.id))}
+function render(){let v=visible();el('body').innerHTML=v.length?v.map(x=>'<tr data-path="'+esc(x.path)+'"><td><input class="pick" type="checkbox" data-id="'+esc(x.id)+'" '+(chosen.has(x.id)?'checked':'')+'></td><td><div class="name">'+esc(x.displayName||x.name)+(x.isNew?' <span class="new">新增</span>':'')+'</div><button class="path open-path" data-path="'+esc(x.parentPath||x.path)+'" title="打开包所在目录">所在目录：'+esc(x.parentPath||x.path)+'</button><div class="muted">'+esc(x.kind)+' · '+x.files+' 文件</div></td><td class="llm" data-path="'+esc(x.path)+'" title="点一下可以改这一格">'+aiBox(x)+'</td><td><span class="badge '+cls(x.recommendation)+'">'+x.recommendation+(x.manualKeep?'<button class="badge-x" data-unkeep="'+esc(x.path)+'" title="取消保留（按实际情况重新评估）">✕</button>':'')+'</span></td><td><b>'+x.score+'</b></td><td>'+fmt(x.size)+'</td><td>'+esc(x.modified.slice(0,10))+'<div class="muted">'+x.ageDays+' 天前</div></td><td>'+esc(x.redownload)+'</td><td class="'+(x.suspicious?'warn':'')+'">'+esc(x.registration)+'</td><td class="why">'+x.reasons.map(esc).join('；')+'</td></tr>').join(''):'<tr><td colspan="10" class="empty">没有符合筛选条件的项目</td></tr>';document.querySelectorAll('.open-path').forEach(e=>e.onclick=async()=>{let d=await native().open_path(e.dataset.path);if(!d.ok)alert(d.error)});document.querySelectorAll('button.badge-x').forEach(b=>b.onclick=e=>{e.stopPropagation();unkeepRows([b.dataset.unkeep])});document.querySelectorAll('td.llm').forEach(td=>td.onclick=()=>editNote(td));document.querySelectorAll('.pick').forEach(e=>e.onchange=()=>{e.checked?chosen.add(e.dataset.id):chosen.delete(e.dataset.id);update()});update()}function selectedItems(){return items.filter(x=>chosen.has(x.id))}
 function selectedPaths(){return selectedItems().map(x=>x.path)}
 function update(){
  let n=chosen.size,picked=selectedItems();
@@ -199,7 +193,7 @@ async function load(force){
    let cfg=await api.get_settings();
    applySettingsState(cfg&&cfg.ok?cfg.result:null);
    if(cfg&&cfg.ok&&cfg.result&&cfg.result.destination)lastDestination=cfg.result.destination;
-   let missing=items.filter(x=>!x.aiDescription&&(force?x.isNew:true)).map(x=>x.path);
+   let missing=items.filter(x=>!x.aiDescription&&!String(x.note||'').trim()&&(force?x.isNew:true)).map(x=>x.path);
    if(cfg&&cfg.ok&&cfg.result.autoAnalyze&&cfg.result.apiKeyMasked&&missing.length)enrich(missing,true)
   }
  }catch(e){
@@ -421,7 +415,7 @@ function analyzedAgo(list) {
 	if (recent - oldest < 120000) return agoFrom(recent);
 	return '最近一次 ' + agoFrom(recent) + '（最早 ' + agoFrom(oldest) + '）'
 }
-async function enrich(paths, quiet = false, force = false, skipped = 0) {
+async function enrich(paths, quiet = false, force = false, skipped = 0, deep = false) {
 	if (!native() || !paths.length) return;
 	let errors = [], b = el('aiAnalyze');
 	if (b) b.disabled = true;
@@ -432,15 +426,15 @@ async function enrich(paths, quiet = false, force = false, skipped = 0) {
 		enrichLabel = '正在分析第 ' + span + ' 项（共 ' + paths.length + ' 项）'; infoBusyText(enrichLabel);
 		el('status').textContent = 'DeepSeek 并发分析 ' + span + ' / ' + paths.length;
 		let d;
-		try { d = await native().enrich(group, !!force) } catch (e) { d = { ok: false, error: e.message } }
+			try { d = await native().enrich(group, !!force, !!deep) } catch (e) { d = { ok: false, error: e.message } }
 		if (d && d.result) for (let x of items) if (d.result[x.path]) x.aiDescription = d.result[x.path];
 		render();
 		if (!d || !d.ok) errors.push(...Object.values((d && d.errors) || { error: (d && d.error) || '未知错误' }))
 	}
 	enrichRunning--;
 	let ok = !errors.length;
-	let tail = skipped ? ('（另 ' + skipped + ' 项已分析过，跳过）') : '';
-	el('status').textContent = ok ? ('DeepSeek 分析完成并已缓存' + (skipped ? ' · 跳过 ' + skipped + ' 项已分析过的' : '')) : ('分析完成，失败 ' + errors.length + ' 项（可选择后重试）');
+	let tail = skipped ? ('（另 ' + skipped + ' 项已跳过）') : '';
+	el('status').textContent = ok ? ('DeepSeek 分析完成并已缓存' + (skipped ? ' · 跳过 ' + skipped + ' 项' : '')) : ('分析完成，失败 ' + errors.length + ' 项（可选择后重试）');
 	if (b) b.disabled = false;
 	infoDone(ok ? ('AI 分析完成（' + paths.length + ' 项）' + tail) : ('分析完成，失败 ' + errors.length + ' 项，可勾选后重试'), !ok);
 	if (!ok && !quiet) alert('AI 搜索失败：' + errors.join('；'))
@@ -520,7 +514,7 @@ async function saveSettings(){
  if(r.keyWarning)msg+='\n\n⚠️ Key 格式提醒：'+r.keyWarning;
  el('apiKey').value='';el('settingsModal').classList.remove('open');applySettingsState(r);toast(msg)
 }
-async function analyzeNow(){if(!native())return alert('AI 分析仅桌面版可用');let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoAnalyze:el('autoAnalyze').checked,scanAI:el('scanAI').checked});if(!d.ok)return alert(d.error);let cfg=await native().get_settings();if(!cfg.ok)return alert(cfg.error);if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先填写并保存');if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后再点「立即 AI 分析」。');let missing=groupItems().filter(x=>!x.aiDescription).map(x=>x.path);if(!missing.length){let done=items.filter(x=>x.aiDescription&&x.aiDescription.searchedAt);return alert('所有项目都已有 AI 说明'+(done.length?'（'+analyzedAgo(done)+'分析过）':'')+'，不用再分析。\n想重做的话，回到表格勾选项目后按住 Shift 点工具栏的「AI 分析」。')}el('settingsModal').classList.remove('open');toast('开始 AI 分析 '+missing.length+' 个项目，完成后会提示');await enrich(missing,false)}
+async function analyzeNow(){if(!native())return alert('AI 分析仅桌面版可用');let d=await native().save_settings({apiKey:el('apiKey').value,baseUrl:el('baseUrl').value,model:el('model').value,autoAnalyze:el('autoAnalyze').checked,scanAI:el('scanAI').checked});if(!d.ok)return alert(d.error);let cfg=await native().get_settings();if(!cfg.ok)return alert(cfg.error);if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先填写并保存');if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后再点「立即 AI 分析」。');let missing=groupItems().filter(x=>!x.aiDescription&&!String(x.note||'').trim()).map(x=>x.path);if(!missing.length){let done=items.filter(x=>x.aiDescription&&x.aiDescription.searchedAt);return alert('所有项目都已有 AI 说明'+(done.length?'（'+analyzedAgo(done)+'分析过）':'')+'，不用再分析。\n想重做的话，回到表格勾选项目后按住 Shift 点工具栏的「AI 分析」。')}el('settingsModal').classList.remove('open');toast('开始 AI 分析 '+missing.length+' 个项目，完成后会提示');await enrich(missing,false)}
 
 async function action(type){
  let picked=selectedItems(),paths=picked.map(x=>x.path);
@@ -587,40 +581,46 @@ syncQa();
 let started=false;async function startWhenReady(){if(started)return;let api=native();if(api&&typeof api.scan==='function'&&typeof api.enrich==='function'){started=true;el('status').textContent='原生接口已连接';try{let v=await api.app_version();if(v&&v.ok&&v.result)el('ver').textContent='V'+v.result}catch(_){}try{let gl=await api.group_list();if(gl&&gl.ok&&Array.isArray(gl.result)&&gl.result.length){scanGroups=gl.result.slice();if(!groupOf(activeGroup))activeGroup=scanGroups[0].id;renderTags();fillRootSelect();refreshCounts()}}catch(_){}await load(false);return}el('status').textContent='正在连接本机分析接口…';setTimeout(startWhenReady,200)}window.addEventListener('pywebviewready',startWhenReady);startWhenReady();
 
 async function editNote(td){
-	let typing=td.querySelector('input.note-edit');
+	let typing=td.querySelector('textarea.note-edit');
 	if(typing){typing.focus();return}
 	let path=td.dataset.path,item=items.find(x=>x.path===path);
-	let cur=String((item&&item.note)||'').trim();
-	let ai=(item&&item.aiDescription&&item.aiDescription.summary)?String(item.aiDescription.summary):'';
-	let start=cur||ai;              /* 预填「现在显示的那句话」：直接在原文上改，或在后面接着补 */
+	let cur=String((item&&item.note)||'').replace(/\r\n/g,'\n').trim();
+	let ai=(item&&item.aiDescription&&item.aiDescription.summary)?String(item.aiDescription.summary).trim():'';
+	let aiLine=ai?('AI：'+ai):'';
+	let start=cur?(aiLine?(cur+'\n'+aiLine):cur):aiLine;   /* 改的时候 AI 的话也载入，方便对照；最后以你写的为准 */
 	let old=td.innerHTML;
-	td.innerHTML='<input class="note-edit" type="text" maxlength="400" spellcheck="false" autocomplete="off" placeholder="直接改这句话，或在后面补充；清空后回车＝恢复 AI 原话">'
-		+'<div class="note-hint">⏎ 保存 · Esc 取消'+(ai?' · 清空后 ⏎ 恢复 AI 原话':'')+'</div>';
-	let inp=td.querySelector('input.note-edit');
+	td.innerHTML='<textarea class="note-edit" rows="3" spellcheck="false" autocomplete="off" title="Enter 换行 · Ctrl+Enter 或点别处保存 · Esc 取消 · 清空后保存＝恢复 AI"></textarea>';
+	let inp=td.querySelector('textarea.note-edit');
 	inp.value=start;
 	inp.focus();
-	if(cur)inp.select();else inp.setSelectionRange(start.length,start.length);   /* 改自己的说明＝全选；第一次改 AI 的话＝光标放末尾，方便接着补 */
+	let caret=cur?cur.length:start.length;
+	try{inp.setSelectionRange(caret,caret)}catch(_){}
 	let closed=false;
 	const finish=async save=>{
 		if(closed)return;
 		closed=true;
-		let v=inp.value.trim();
+		let v=save?inp.value.replace(/\r\n/g,'\n'):'';
+		if(aiLine){
+			if(v.endsWith('\n'+aiLine))v=v.slice(0,-(aiLine.length+1));   /* 没动 AI 那一行＝只存你自己写的 */
+			if(v===aiLine)v='';                                          /* 只剩 AI 那句＝恢复 AI 显示 */
+		}
+		v=v.trim();
 		if(!save||v===cur){td.innerHTML=old;return}
+		if(v===ai)v='';
 		if(!native()||typeof native().set_note!=='function'){toast('改说明仅桌面版可用',true);td.innerHTML=old;return}
-		if(v===ai)v='';               /* 改回与 AI 原话一模一样＝不要自己的版本 */
 		let d;
 		try{d=await native().set_note(path,v)}catch(e){d={ok:false,error:e.message}}
-		if(!d||!d.ok){toast('说明保存失败：'+((d&&d.error)||'未知错误'),true);td.innerHTML=old;return}
+		if(!d||!d.ok){toast('保存失败：'+((d&&d.error)||'未知错误'),true);td.innerHTML=old;return}
 		if(item)item.note=(d.result&&d.result.note)||'';
 		td.innerHTML=item?aiBox(item):old;
-		let msg=v?'这一格已按你的说明为准':'已恢复 AI 原话';
+		let msg=v?'已保存':'已恢复 AI';
 		toast(msg);
 		infoDone(msg,false)
 	};
 	inp.onclick=e=>e.stopPropagation();
 	inp.onblur=()=>finish(true);
 	inp.onkeydown=e=>{
-		if(e.key==='Enter'){e.preventDefault();finish(true)}
+		if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();finish(true)}
 		else if(e.key==='Escape'){e.preventDefault();finish(false)}
 	};
 }
@@ -642,8 +642,8 @@ function openCtx(ev,tr){
  let cnt='<span class="ctx-count">'+paths.length+' 项</span>',suffix=multi?(' '+cnt):'';
  let m=el('ctxMenu');
  m.innerHTML='<div class="ctx-head">'+(multi?('已选 '+paths.length+' 项'):esc(item.displayName||item.name))+'</div>'
-  +'<button data-act="ai" title="'+(multi?('对勾选的 '+paths.length+' 个项目做 DeepSeek 分析（已有说明会重做）'):'对这个项目做 DeepSeek 分析（已有说明会重做）')+'">AI 分析'+suffix+'</button>'
-  +'<button data-act="note"'+(multi?' disabled title="多选时不可用：说明是按单个项目改的，只勾选一个再右键"':' title="直接改「AI 说明：这是个什么包」这一格：AI 说得不准或不完整，就在它的原话上改 / 补充，改完以你的版本为准（点那一格也能改）"')+'>改这一格的说明</button>'
+  +'<button data-act="ai" title="'+(multi?('对勾选的 '+paths.length+' 个项目做 DeepSeek 分析（分析过的、你标注过的会跳过）'):'对这个项目做 DeepSeek 分析（你标注过的会先问一句，确认后深挖子目录重做）')+'">AI 分析'+suffix+'</button>'
+  +'<button data-act="note"'+(multi?' disabled title="多选时不可用：说明是按单个项目改的，只勾选一个再右键"':' title="改这一格：AI 的话会一起载入，保存后以你写的为准（点那一格也能改）"')+'>改这一格的说明</button>'
   +'<div class="ctx-sep"></div>'
   +'<button data-act="keep"'+(anyUnkept?(' title="把'+(multi?('这 '+paths.length+' 个项目'):'这个项目')+'标为保留：永久留用，不再出现在清理建议里"'):' disabled title="选中的项目都已标为保留，不需要重复操作"')+'>标为保留'+suffix+'</button>'
   +'<button data-act="unkeep"'+(anyKeep?' title="取消「保留」标记，取消后按磁盘实际情况重新评估建议"':' disabled title="选中的项目都没有「保留」标记，不需要取消"')+'>取消保留'+suffix+'</button>'
@@ -660,7 +660,7 @@ function openCtx(ev,tr){
  m.style.top=Math.max(6,Math.min(y,window.innerHeight-h-8))+'px';
 }async function runCtx(act){
  let t=ctxTarget;closeCtx();if(!t)return;
- if(act==='note'){if(t.multi){toast('说明只能一行一行改：多选时请只勾选一个项目再右键。');return}let td=t.tr.querySelector('td.llm');if(td)editNote(td);return}
+if(act==='note'){if(t.multi){toast('多选时不能改说明：请只勾选一个项目再右键。');return}let td=t.tr.querySelector('td.llm');if(td)editNote(td);return}
  if(act==='ai'){await aiAnalyzePaths(t.paths,false);return}
  if(act==='keep'){await keepRows(t.paths);return}
  if(act==='unkeep'){await unkeepRows(t.paths);return}
@@ -668,36 +668,48 @@ function openCtx(ev,tr){
  if(act==='open'){if(t.multi){toast('「打开所在目录」一次只能打开一个。');return}let d=await native().open_path(t.item.parentPath||t.item.path);if(!d||!d.ok)toast((d&&d.error)||'打开失败',true);return}
  if(act==='move'){openMoveDialog(t.paths);return}
  if(act==='del'){await deleteRows(t.paths);return}
-}async function enrichRows(paths,force,skipped){
- let api=native();
- if(!api||typeof api.enrich!=='function')return alert('AI 分析仅桌面版可用');
- if(!paths||!paths.length)return alert('没有需要分析的项目');
- let cfg=await api.get_settings();
- if(!cfg||!cfg.ok)return alert((cfg&&cfg.error)||'读取设置失败');
- if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先点右上角「模型设置」填写并保存。');
- if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后再试。');
- await enrich(paths,false,!!force,skipped||0)
+}async function enrichRows(paths,force,skipped,deep){
+	let api=native();
+	if(!api||typeof api.enrich!=='function')return alert('AI 分析仅桌面版可用');
+	if(!paths||!paths.length)return alert('没有需要分析的项目');
+	let cfg=await api.get_settings();
+	if(!cfg||!cfg.ok)return alert((cfg&&cfg.error)||'读取设置失败');
+	if(!cfg.result.apiKeyMasked)return alert('尚未配置 DeepSeek API Key，请先点右上角「模型设置」填写并保存。');
+	if(cfg.result.keyFormatProblem)return alert('⚠️ '+cfg.result.keyFormatProblem+'\n\n请到 DeepSeek 控制台重新复制 Key（形如 sk- 开头共 35 位）后再试。');
+	await enrich(paths,false,!!force,skipped||0,!!deep)
 }
-/* 把要分析的路径分成「需要跑的」和「已经分析过的」 */
+/* 把要分析的路径分成「要跑的」和「跳过的」：分析过的跳过，你标注过的也跳过（以你的为准） */
 function aiTodo(paths,force){
- let todo=[],analyzed=[];
- for(let p of paths){
-  let it=items.find(x=>x.path===p);
-  if(!it)continue;
-  if(it.aiDescription&&!force)analyzed.push(it);
-  if(force||!it.aiDescription)todo.push(p)
- }
- return {todo:todo,analyzed:analyzed}
+	let todo=[],analyzed=[],noted=0;
+	for(let p of paths){
+		let it=items.find(x=>x.path===p);
+		if(!it)continue;
+		if(!force&&String(it.note||'').trim()){noted++;continue}
+		if(it.aiDescription&&!force)analyzed.push(it);
+		if(force||!it.aiDescription)todo.push(p)
+	}
+	return {todo:todo,analyzed:analyzed,noted:noted}
 }
 async function aiAnalyzePaths(paths,force){
- let r=aiTodo(paths,force);
- if(!r.todo.length){infoDone('这 '+r.analyzed.length+' 项上次分析过（'+analyzedAgo(r.analyzed)+'），文件没变，不用再分析。要重做就按住 Shift 点「AI 分析」。',false);return}
- await enrichRows(r.todo,force,r.analyzed.length)
+	let picked=paths.map(p=>items.find(x=>x.path===p)).filter(Boolean);
+	let noted=picked.filter(x=>String(x.note||'').trim());
+	let deep=false;
+	/* 只分析这一项、而你已经标注过：先问一句；确认＝重做，并深挖子目录（不满意才会要重做） */
+	if(noted.length&&picked.length===1&&!force){
+		if(!await uiConfirm('这一项你已经标注过，是否继续分析？\n继续会重新问一次 AI，并深挖子目录内容。','继续分析'))return;
+		force=true;deep=true
+	}
+	let r=aiTodo(paths,force);
+	if(!r.todo.length){
+		if(r.noted){infoDone('这 '+r.noted+' 项你标注过，已跳过。要重做就只勾选这一项再点「AI 分析」。',false);return}
+		infoDone('这 '+r.analyzed.length+' 项上次分析过（'+analyzedAgo(r.analyzed)+'），文件没变，不用再分析。要重做就按住 Shift 点「AI 分析」。',false);return
+	}
+	await enrichRows(r.todo,force,r.analyzed.length+r.noted,deep)
 }
 async function aiAnalyze(force){
- let paths=chosen.size?selectedPaths():groupItems().filter(x=>!x.aiDescription).map(x=>x.path);
- if(!paths.length){infoDone('表格里的项目都已有 AI 说明，不用再分析。想重做就先勾选项目再点「AI 分析」。',false);return}
- await aiAnalyzePaths(paths,!!force)
+	let paths=chosen.size?selectedPaths():groupItems().filter(x=>!x.aiDescription&&!String(x.note||'').trim()).map(x=>x.path);
+	if(!paths.length){infoDone('表格里的项目都已有 AI 说明，不用再分析。想重做就先勾选项目再点「AI 分析」。',false);return}
+	await aiAnalyzePaths(paths,!!force)
 }
 async function keepRows(paths){
  let api=native();

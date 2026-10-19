@@ -61,8 +61,8 @@ class Api:
    data=data or {}
    return server.test_connection(data.get('baseUrl'),data.get('model'),data.get('apiKey'))
   except Exception as e: return {'ok':False,'error':str(e)}
- def enrich(self, paths, force=False):
-  try: return server.enrich_items(paths, force)
+ def enrich(self, paths, force=False, deep=False):
+  try: return server.enrich_items(paths, force, deep)
   except Exception as e: return {'ok':False,'error':str(e)}
  def set_note(self, path, text):
   try: return {'ok':True,'result':server.save_note(path,text)}
