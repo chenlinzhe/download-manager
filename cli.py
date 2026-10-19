@@ -133,13 +133,20 @@ def cmd_search(args):
 
 def cmd_describe(args):
  items,_=read_items(args.refresh)
- want=str(args.path or '').strip().lower().replace('/','\\').rstrip('\\')
+ raw=str(args.path or '').strip()
+ want=raw.lower().replace('/','\\').rstrip('\\')
  hit=None
  for x in items:
   p=str(x.get('path') or '').lower().replace('/','\\').rstrip('\\')
   if p==want: hit=x; break
   if not hit and p.endswith(want): hit=x
- if not hit: return {'ok':False,'command':'describe','error':'没找到这个条目：'+str(args.path)}
+ if not hit:  # 再退一步：按名字或路径包含匹配（外部工具常常只给个名字片段）
+  cands=[x for x in items if want and (want in str(x.get('name') or '').lower() or want in str(x.get('path') or '').lower().replace('/','\\'))]
+  if len(cands)==1: hit=cands[0]
+  elif len(cands)>1:
+   return {'ok':False,'command':'describe','error':'匹配到多条，请给更完整的路径：'+raw,
+    'candidates':[{'name':x.get('name'),'path':x.get('path')} for x in cands[:10]]}
+ if not hit: return {'ok':False,'command':'describe','error':'没找到这个条目：'+raw}
  out=dict(hit); out['sizeHuman']=human(hit.get('size'))
  return {'ok':True,'command':'describe','item':out}
 

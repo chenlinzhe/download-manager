@@ -1112,6 +1112,24 @@ class TestCli(TempApp):
         self.assertTrue(out['ok'])
         self.assertEqual(out['item']['name'], 'beta')
 
+    def test_describe_by_name_fragment(self):
+        out = self.cli.cmd_describe(self.argv('describe', 'alp'))
+        self.assertTrue(out['ok'], u'外部工具常常只给名字片段，应能匹配到')
+        self.assertEqual(out['item']['name'], 'alpha')
+
+    def test_describe_ambiguous_fragment_lists_candidates(self):
+        for name in ('gamma1', 'gamma2'):
+            (self.root / name).mkdir()
+        server.scan(True)
+        out = self.cli.cmd_describe(self.argv('describe', 'gamma'))
+        self.assertFalse(out['ok'])
+        self.assertGreaterEqual(len(out.get('candidates') or []), 2, u'匹配到多条时要给出候选，别乱猜')
+
+    def test_describe_exact_path_tail_wins_over_fragment(self):
+        out = self.cli.cmd_describe(self.argv('describe', 'a'))
+        self.assertTrue(out['ok'])
+        self.assertEqual(out['item']['name'], 'alpha', u'路径结尾能唯一命中时优先，不该报「多条」')
+
     def test_out_writes_plain_utf8_json(self):
         target = self.dir / 'out' / 'list.json'
         code = self.cli.main(['list', '--out', str(target), '--pretty'])
