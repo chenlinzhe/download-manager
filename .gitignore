@@ -36,6 +36,7 @@ collection_classifications.json
 collection_failures.json
 user_labels.json
 user_notes.json
+ai_hidden.json
 manual_roots.json
 resource_groups.json
 *.tmp

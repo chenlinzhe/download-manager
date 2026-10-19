@@ -11,7 +11,7 @@ LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
 GROUPS_FILE=APP/'resource_groups.json'
 AI_HIDDEN_FILE=APP/'ai_hidden.json'
-APP_VERSION='2.7'
+APP_VERSION='2.8'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -232,7 +232,9 @@ def _llm_error(e, key='', model=''):
 
 _VEC={'fp':None,'idf':None,'docs':None}
 def _search_text(item):
- return ' '.join([item.get('name',''),item.get('displayName',''),item.get('path',''),item.get('kind',''),(item.get('aiDescription') or {}).get('summary',''),item.get('recommendation',''),item.get('note') or '']).lower()
+ # V2.8：你动过这一格（改写 / 删掉 AI 那句）之后，AI 原话就不再算这一格的内容，搜索也不该再命中它
+ summary='' if item.get('aiHidden') else (item.get('aiDescription') or {}).get('summary','')
+ return ' '.join([item.get('name',''),item.get('displayName',''),item.get('path',''),item.get('kind',''),summary,item.get('recommendation',''),item.get('note') or '']).lower()
 _STOP=set('的了着是在有和与及或也都就才又再还只但并而这那此其某个吗呢吧啊呀哦嗯哈嗦啦喰么之对从向给被把让到于为以用想找要搜查看请帮哪什该我你他她它咱侩种')
 _STOP|={'一个','一下','一种','一些','一类','一款','这个','那个','这些','那些','哪个','哪些','这种','那种','哪种','这么','那么','这样','那样','一点','有些','东西','里面','我们','你们','他们','她们','它们','咱们','自己','可以','想要','需要','应该','看看','点儿','有点儿','如何','为什么'}
 _STOP|={'a','an','the','of','for','is','are','it','to','and','or','this','that','these','those','want','find','get','with','my','me','one','we','you','they'}
@@ -295,6 +297,7 @@ def natural_search(query):
  cfg=get_settings(True); key=cfg.get('apiKey','')
  if not key: raise ValueError('尚未配置 DeepSeek API Key')
  with LOCK: items=list(CACHE.get('items',[]))
+ items=_with_notes({'items':items}).get('items',items)   # 带上 note / aiHidden：你删掉 AI 那句的格子不该再按 AI 原话搜到
  texts=[_search_text(x) for x in items]
  terms=split_query_terms(query)
  base=(cfg.get('baseUrl') or 'https://api.deepseek.com').strip().rstrip('/')
@@ -336,7 +339,7 @@ def natural_search(query):
  if cand:
   lines=[]
   for n,i in enumerate(cand):
-   info=(items[i].get('aiDescription') or {}).get('summary','')
+   info='' if items[i].get('aiHidden') else (items[i].get('aiDescription') or {}).get('summary','')
    lines.append('%d. %s｜%s' % (n, items[i].get('name',''), info))
   prompt=('是一款“下载包管家”应用，要从本机缓存的下载包里找出用户关心的那类。\n'
     '用户查询：'+str(query)+'\n'
@@ -796,7 +799,7 @@ def deepseek_description(item,deep=False):
  except (KeyError,IndexError,ValueError) as e: raise RuntimeError('DeepSeek 返回内容无法解析：'+str(e)[:120])
 
 def enrich_items(paths, force=False, deep=False):
- wanted=set(paths); cache=load_json_file(AI_CACHE_FILE,{}); notes=load_notes(); skipped=0
+ wanted=set(paths); cache=load_json_file(AI_CACHE_FILE,{}); notes=load_notes(); hidden=load_ai_hidden(); skipped=0
  # Reuse the most recent scan. The old implementation rescanned every drive for
  # every package, which made the UI appear stuck.
  with LOCK: cached_items=list(CACHE.get('items',[]))
@@ -805,9 +808,9 @@ def enrich_items(paths, force=False, deep=False):
  results={}; errors={}; pending=[]; fresh=[]
  for item in targets:
   fp=item_fingerprint(item)
-  # V2.6：你已经标注过这一格＝以你的版本为准，批量分析时直接跳过，不花额度也不覆盖你的话；
-  # deep（单独确认过的重做）和 force（按住 Shift）是你明确要求，照做。
-  if not force and not deep and str(notes.get(item['path']) or '').strip():
+  # V2.8：你动过这一格（写过自己的话，或把 AI 那句删干净）＝以你的为准，批量分析直接跳过，
+  # 不花额度也不覆盖你的话；deep（单独确认过的重做）和 force（按住 Shift）是你明确要求，照做。
+  if not force and not deep and (str(notes.get(item['path']) or '').strip() or item['path'] in hidden):
    skipped+=1; continue
   # force / deep：你明确要求重做，忽略缓存再问一遍 AI
   if fp in cache and not force and not deep: results[item['path']]=cache[fp]
@@ -829,11 +832,11 @@ def enrich_items(paths, force=False, deep=False):
     fresh.append(item['path'])
    except Exception as e: errors[item['path']]=str(e)
  if pending: save_json_file(AI_CACHE_FILE,cache)
- if fresh:  # 重做成功：把「你删掉过」的记录去掉，新说明照常显示
-  hidden=load_ai_hidden()
-  for path in fresh: hidden.pop(path,None)
-  save_ai_hidden(hidden)
- return {'ok':not errors,'result':results,'errors':errors,'skipped':skipped,'deep':bool(deep)}
+ if fresh:  # 重做成功：把你动过的记录去掉，新说明加到格子下面，你写的话一个字不动
+  rest=load_ai_hidden()
+  for path in fresh: rest.pop(path,None)
+  save_ai_hidden(rest)
+ return {'ok':not errors,'result':results,'errors':errors,'skipped':skipped,'deep':bool(deep),'fresh':fresh}
 
 def collection_signature(p):
  try:
@@ -929,7 +932,7 @@ def load_notes():
  except (OSError,json.JSONDecodeError): return {}
 
 def load_ai_hidden():
- """你亲手删掉 AI 说明的那几格：记在名单里，重新扫描 / 批量分析都不会把它再写回来。"""
+ """你动过的那几格（改写或删掉 AI 说明）：记在名单里，AI 那句不再显示，重新扫描 / 批量分析也不会写回来。"""
  try:
   data=json.loads(AI_HIDDEN_FILE.read_text(encoding='utf-8'))
   return data if isinstance(data,dict) else {}
@@ -951,15 +954,17 @@ def fold_note(text):
  return '\n'.join(lines)[:400]
 
 def save_note(path, text, hide_ai=False):
- """保存用户改过 / 补过的说明（按包路径存，最多 400 字，可以多行）。
- hide_ai=True：用户把这一格整个删掉了——连 AI 那句一起删掉，之后扫描 / 批量分析都不会把它写回来，
- 想让它再写就按住 Shift 点「AI 分析」重做（重做成功会自动解除）。
- 格子显示的就是它，原样呈现、不加标签，以用户的版本为准。"""
+ """保存你改过 / 补过的说明（按包路径存，最多 400 字，可以多行）。
+ V2.8：只要你动过这一格，AI 那句就不算数了（记进 ai_hidden.json）——
+ 改写过＝这一格全是你的话；全删干净（hide_ai=True）＝连 AI 那句一起删掉、格子空着。
+ 这两种情况默认都不会再被批量 AI 分析写回；想让它再说一遍就单独分析这一项（或按住 Shift 点「AI 分析」），
+ 成功后会加回「AI：…」这一行，你写的一个字都不动。只有在你只留「AI：…」那一行时才恢复 AI。"""
  notes=load_notes(); hidden=load_ai_hidden(); key=str(path or '')
  if not key: raise ValueError('缺少包路径')
  note=fold_note(text)
  if note:
-  notes[key]=note; hidden.pop(key,None)
+  # 你改写过这一格：AI 那句不再算数，这一格从此全是你的（也默认不再被 AI 分析）
+  notes[key]=note; hidden[key]=datetime.now().isoformat(timespec='seconds')
  elif hide_ai:
   notes.pop(key,None); hidden[key]=datetime.now().isoformat(timespec='seconds')
  else:

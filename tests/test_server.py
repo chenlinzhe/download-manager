@@ -366,7 +366,7 @@ class TestLlmError(unittest.TestCase):
 
 
 class TestNotes(TempApp):
-    """这一格的说明：你写的字原样存、可以多行、参与搜索；你也可以把 AI 那句一起删掉。"""
+    """这一格的说明：你写的字原样存、可以多行、参与搜索；你动过之后这一格就归你，AI 那句不再单独显示。"""
 
     def test_save_and_reload(self):
         path = 'D:\\Downloads\\tool.zip'
@@ -429,12 +429,13 @@ class TestNotes(TempApp):
         self.assertTrue(merged['items'][0]['aiHidden'])
         self.assertEqual(merged['items'][0]['note'], '')
 
-    def test_writing_your_own_note_cancels_the_delete(self):
+    def test_writing_your_own_note_also_takes_the_cell_over(self):
+        """V2.8：你写了字（哪怕没动 AI 那句），这一格就归你，AI 那句不再单独显示。"""
         path = 'D:\\Downloads\\canon.exe'
         server.save_note(path, u'', True)
         r = server.save_note(path, u'佳能打印机驱动')
-        self.assertFalse(r['aiHidden'])
-        self.assertNotIn(path, server.load_ai_hidden())
+        self.assertTrue(r['aiHidden'], u'你动过这一格，AI 那句就不算数了')
+        self.assertIn(path, server.load_ai_hidden())
         self.assertEqual(server.load_notes()[path], u'佳能打印机驱动')
 
     def test_restore_ai_clears_the_delete(self):
@@ -445,18 +446,38 @@ class TestNotes(TempApp):
         self.assertFalse(r['aiHidden'])
         self.assertNotIn(path, server.load_ai_hidden())
 
+    def test_rewriting_the_ai_line_also_records_hidden(self):
+        """框里留着「AI：…」但改成自己的话保存＝接受它并改写：内容并入你的话，AI 那句不再单独显示。"""
+        path = 'D:\\Downloads\\canon.exe'
+        r = server.save_note(path, u'佳能打印机驱动（原话改写成这样）')
+        self.assertTrue(r['aiHidden'])
+        self.assertIn(path, server.load_ai_hidden())
+        self.assertEqual(server.load_notes()[path], u'佳能打印机驱动（原话改写成这样）')
+
+    def test_your_own_words_still_searchable_when_ai_is_hidden(self):
+        """你动过的格子：你自己的话照样参与搜索（不再算的是 AI 原话）。"""
+        text = server._search_text({'name': 'canon.exe', 'note': u'佳能打印机驱动', 'aiHidden': True})
+        self.assertIn(u'佳能打印机驱动', text)
+
+    def test_hidden_ai_summary_is_not_searchable(self):
+        """AI 那句被你否掉之后，搜索 / 排序都不该再按它命中。"""
+        item = {'name': 'canon.exe', 'aiDescription': {'summary': u'某个安装程序'}}
+        self.assertIn(u'某个安装程序', server._search_text(item))
+        item['aiHidden'] = True
+        self.assertNotIn(u'某个安装程序', server._search_text(item))
+
     def test_hidden_list_survives_reload(self):
         path = 'D:\\Downloads\\x.msi'
         server.save_note(path, u'', True)
         self.assertEqual(server.load_ai_hidden(), {path: server.load_ai_hidden()[path]})
 
-    def test_note_discards_previous_delete(self):
-        """先删后写：你后来写的话要显示，不能被旧的删除记录压住。"""
+    def test_note_keeps_the_cell_yours_after_an_earlier_delete(self):
+        """先删后写：这一格仍然归你——你的话照显示，AI 那句不回来。"""
         path = 'D:\\Downloads\\canon.exe'
         server.save_note(path, u'', True)
         server.save_note(path, u'留着')
         merged = server._with_notes({'items': [{'path': path}]})
-        self.assertFalse(merged['items'][0]['aiHidden'])
+        self.assertTrue(merged['items'][0]['aiHidden'])
         self.assertEqual(merged['items'][0]['note'], u'留着')
 
     def test_note_survives_reload(self):
@@ -839,6 +860,28 @@ class TestEnrichForce(TempApp):
         self.assertIn(path, server.load_ai_hidden(), u'没重做就不能把删掉的写回来')
         server.enrich_items([path], True)
         self.assertNotIn(path, server.load_ai_hidden())
+
+    def test_deleted_ai_cell_is_skipped_by_batch_analysis(self):
+        """删干净保存（hide_ai）的项目＝你动过，批量分析也跳过，格子保持空着。"""
+        path = self.items[1]['path']
+        server.save_note(path, u'', True)
+        out = server.enrich_items([path])
+        self.assertEqual(self.calls, [], u'你动过的那几格不该再问 AI')
+        self.assertEqual(out['skipped'], 1)
+        self.assertNotIn(path, out['result'])
+
+    def test_redo_keeps_your_words_and_reports_fresh(self):
+        """重做成功后：新 AI 说明加到你写的字下面，你的话一个字不动，fresh 报给前端。"""
+        path = self.items[1]['path']
+        server.save_note(path, u'我的话')
+        out = server.enrich_items([path], True)
+        self.assertEqual(server.load_notes()[path], u'我的话', u'你的话不能被 AI 分析改掉')
+        self.assertNotIn(path, server.load_ai_hidden(), u'重做完 AI 回来了')
+        self.assertEqual(out['fresh'], [path])
+
+    def test_fresh_is_empty_when_nothing_was_reasked(self):
+        out = server.enrich_items([self.items[0]['path']])
+        self.assertEqual(out['fresh'], [], u'命中缓存没有新结果，fresh 是空列表')
 
     def test_deep_redoes_even_if_you_noted_it(self):
         """单独分析 + 你确认继续＝重做，不受「标注过就跳过」影响。"""
