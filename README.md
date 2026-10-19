@@ -2,7 +2,7 @@
 
 > **你的下载目录，AI 帮你管。** 一款运行在本机的下载包智能整理工具——自动扫描、AI 识别、风险预警、一键整理，再也不用面对几 TB 的"下载"文件夹发愁。
 
-当前版本：**V2.9** ｜ 绿色免安装 ｜ Windows 10/11
+当前版本：**V3.0** ｜ 绿色免安装 ｜ Windows 10/11
 
 ---
 
@@ -54,7 +54,7 @@ python cli.py describe "WeChat"      # 看单个条目的完整信息（按路�
 python cli.py scan --force           # 跑一次纯本地扫描（几秒）
 
 # 打包好的窗口版 EXE 没有控制台，用 --cli 并加 --out 落文件
-"下载包管家智能搜索版-v29.exe" --cli list --limit 100 --out out.json
+"下载包管家智能搜索版-v30.exe" --cli list --limit 100 --out out.json
 ```
 
 - `list` 支持 `--group`（标签 id，见 `groups`）、`--query`、`--recommendation`、`--sort`（name / size / score / modified / recommendation）、`--order`、`--limit`、`--offset`、`--fields`（只要某几个字段）。
@@ -119,7 +119,7 @@ python cli.py scan --force           # 跑一次纯本地扫描（几秒）
 
 ### 直接使用（推荐，无需装 Python）
 
-👉 **[⬇️ 下载 DownloadPackageManager-v29.exe](https://github.com/chenlinzhe/download-manager/releases/latest)**
+👉 **[⬇️ 下载 DownloadPackageManager-v30.exe](https://github.com/chenlinzhe/download-manager/releases/latest)**
 
 下载后**双击运行**即可。首次使用在【模型设置】里给默认模型填 API Key（DeepSeek 的形如 `sk-` 开头共 35 位，默认型号 `deepseek-flash`）——也可以点「＋ 添加模型」再加几个常用模型（OpenAI、Claude、Kimi、GLM、通义千问、硅基流动、本地 Ollama 或自定义地址），每个模型各存各的 Key、互不影响。默认模型那把 Key 会同时写进本机环境变量 `DEEPSEEK_API_KEY`，并在配置文件留一份 DPAPI 加密备份（明文不落盘、不进 Git），填错了还能一键恢复到上一次保存的那把。
 
@@ -139,7 +139,7 @@ python cli.py --help                  # 看全部子命令
 python cli.py list --limit 10 --pretty
 ```
 
-打包后的 EXE 用 `--cli` 触发同一个入口：`下载包管家智能搜索版-v29.exe` --cli status --out status.json`（窗口版没有控制台，建议用 `--out`）。
+打包后的 EXE 用 `--cli` 触发同一个入口：`下载包管家智能搜索版-v30.exe` --cli status --out status.json`（窗口版没有控制台，建议用 `--out`）。
 
 ### 运行测试
 
