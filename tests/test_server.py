@@ -387,7 +387,7 @@ class TestModelProfiles(TempApp):
         state = server.models_state()
         self.assertEqual(state['count'], 1)
         ids = [p['providerId'] for p in state['suggested']]
-        for want in ('openai', 'anthropic', 'moonshot', 'zhipu', 'qwen', 'siliconflow', 'ollama'):
+        for want in ('openai', 'anthropic', 'moonshot', 'zhipu', 'qwen', 'siliconflow', 'ollama', 'openrouter'):
             self.assertIn(want, ids, u'常见服务商要出现在列表里，用户只要填 Key')
         self.assertNotIn('deepseek', ids, u'已经配好的服务商不该再出现一张空卡片')
         for p in state['suggested']:
@@ -658,6 +658,7 @@ class TestLlmAdapters(unittest.TestCase):
         cat = server.model_catalog()
         ids = [p['id'] for p in cat['providers']]
         self.assertIn('deepseek', ids)
+        self.assertIn('openrouter', ids)
         self.assertIn('custom', ids)
         self.assertEqual([t['id'] for t in cat['clientTypes']],
                          ['openai-chat', 'openai-responses', 'anthropic-messages'])

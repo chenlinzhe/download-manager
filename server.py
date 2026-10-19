@@ -12,7 +12,7 @@ SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INV
 GROUPS_FILE=APP/'resource_groups.json'
 AI_HIDDEN_FILE=APP/'ai_hidden.json'
 MODELS_FILE=APP/'models.json'
-APP_VERSION='3.1'
+APP_VERSION='3.2'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -545,11 +545,14 @@ MODEL_CATALOG=[
   'models':[{'id':'qwen-plus','name':'Qwen Plus'},{'id':'qwen-turbo','name':'Qwen Turbo'}]},
  {'id':'siliconflow','name':'硅基流动','baseUrl':'https://api.siliconflow.cn/v1','clientType':'openai-chat',
   'models':[{'id':'Qwen/Qwen3-8B','name':'Qwen3 8B'}]},
+ {'id':'openrouter','name':'OpenRouter（一个 Key 用很多家模型）','baseUrl':'https://openrouter.ai/api/v1','clientType':'openai-chat',
+  'models':[{'id':'openrouter/auto','name':'Auto（自动挑一个可用模型）'},
+            {'id':'deepseek/deepseek-chat','name':'DeepSeek Chat（走 OpenRouter）'}]},
  {'id':'ollama','name':'本地 Ollama','baseUrl':'http://127.0.0.1:11434/v1','clientType':'openai-chat',
   'models':[{'id':'qwen2.5:7b','name':'Qwen2.5 7B（本机）'}]},
  {'id':'custom','name':'自定义（OpenAI 兼容）','baseUrl':'','clientType':'openai-chat','models':[]},
 ]
-_BASE_HINTS=[('deepseek','deepseek'),('openai.com','openai'),('anthropic','anthropic'),('moonshot','moonshot'),('bigmodel','zhipu'),('dashscope','qwen'),('siliconflow','siliconflow'),('11434','ollama')]
+_BASE_HINTS=[('openrouter','openrouter'),('deepseek','deepseek'),('openai.com','openai'),('anthropic','anthropic'),('moonshot','moonshot'),('bigmodel','zhipu'),('dashscope','qwen'),('siliconflow','siliconflow'),('11434','ollama')]
 
 def _now_iso(): return datetime.now().isoformat(timespec='seconds')
 def _new_model_id(): return 'm_'+uuid.uuid4().hex[:10]

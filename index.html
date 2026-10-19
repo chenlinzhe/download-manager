@@ -186,8 +186,8 @@ button.chip:hover:not(:disabled){border-color:var(--accent);color:var(--accent);
 .dialog-sm{width:min(470px,94vw)}
 .confirm-text{margin:10px 0 0;color:var(--fg-muted);font-size:13.5px;line-height:1.75;white-space:pre-line}
 /* 设置面板：左菜单 + 右侧内容 */
-.dialog-wide{width:min(880px,96vw);padding:0;overflow:hidden}
-.settings{display:grid;grid-template-columns:186px minmax(0,1fr);height:min(560px,86vh);max-height:86vh}
+.dialog-wide{width:min(1060px,97vw);padding:0;overflow:hidden}
+.settings{display:grid;grid-template-columns:200px minmax(0,1fr);height:min(900px,94vh);max-height:94vh}
 .settings-nav{display:flex;flex-direction:column;gap:2px;padding:14px 10px;background:var(--surface-2);border-right:1px solid var(--border)}
 .settings-title{font-size:12px;font-weight:600;color:var(--fg-faint);padding:4px 10px 8px;letter-spacing:.4px}
 button.nav-item{text-align:left;border:0;background:transparent;border-radius:var(--radius-sm);padding:8px 10px;font-weight:500;color:var(--fg-muted)}
@@ -230,16 +230,16 @@ button.seg-btn.active{background:var(--surface);color:var(--fg);box-shadow:inset
 .ignore-row .ignore-note{color:var(--fg-muted);font-size:12px;line-height:1.6;margin-top:2px;white-space:pre-line}
 .seg-count{color:var(--fg-faint);font-weight:400}
 /* V3.0：模型中心（多个常用模型，按服务商分组、可搜索） */
-.model-top{display:flex;gap:8px;align-items:center;margin:12px 0 8px}
+.model-top{display:flex;gap:8px;align-items:center;margin:10px 0 6px}
 .model-search{flex:1 1 auto;min-width:0}
 .model-status{font-size:12px;line-height:1.6;min-height:0;margin-bottom:8px}
 .model-status.err{color:var(--danger-fg)}
 .model-status.ok{color:var(--ok-fg)}
-.model-list{max-height:calc(86vh - 268px);min-height:140px;overflow:auto;display:grid;gap:6px;align-content:start;padding-right:2px}
+.model-list{max-height:calc(94vh - 224px);min-height:200px;overflow:auto;display:grid;gap:5px;align-content:start;padding-right:2px}
 .model-group{display:grid;gap:6px}
 .model-group-head{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--fg-faint);margin:8px 0 0}
 .model-group:first-child .model-group-head{margin-top:0}
-.model-card{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);padding:9px 11px}
+.model-card{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);padding:7px 11px}
 .model-card.current{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:var(--accent-soft)}
 .model-card .model-main{flex:1 1 auto;min-width:0;display:grid;gap:2px}
 .model-card .model-name{display:flex;align-items:center;gap:6px;font-size:13.5px;font-weight:600;color:var(--fg);min-width:0}
@@ -257,7 +257,7 @@ html.dark .model-badge{background:var(--surface)}
 .model-summary{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12.5px;line-height:1.7;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius);padding:8px 11px;margin:0 0 12px}
 .model-summary .k{color:var(--fg-faint);white-space:nowrap}
 .model-summary .v{color:var(--fg);word-break:break-all}
-.model-opts{margin:14px 0 0;border-top:1px solid var(--border);padding-top:10px}
+.model-opts{margin:12px 0 0;border-top:1px solid var(--border);padding-top:10px}
 .model-opts>summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--fg-faint)}
 .model-opts[open]>summary{margin-bottom:8px}
 .model-opts .chk{display:flex;white-space:normal;align-items:flex-start;line-height:1.6;margin:6px 0}
@@ -281,7 +281,7 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
 </head>
 <body>
 <header>
- <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V3.1</span></div>
+ <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V3.2</span></div>
  <div class="qa-wrap"><input id="qa" class="qa-input" type="search" autocomplete="off" spellcheck="false" placeholder="自动问答：问一句，Enter 提交" title="要使用自动问答，请先到「设置」中配置 LLM KEY" aria-label="自动问答"></div>
  <div class="header-right">
   <span id="status">准备加载…</span>
@@ -361,12 +361,11 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
    <button type="button" class="nav-item" data-pane="ignore" title="搜索目录 / AI 分析 两个标签：查看并撤销被忽略的项目，以及被 AI 分析跳过的那几格">忽略名单</button>
    <button type="button" class="nav-item" data-pane="theme" title="跟随系统 / 浅色 / 深色">外观与主题</button>
    <button type="button" class="nav-item" data-pane="guide" title="逐条说明软件里的每个功能：扫描、建议、AI 分析、批量操作、设置">功能说明</button>
-   <div class="nav-foot">下载包管家 V3.1<br>程序不会运行任何安装包</div>
+   <div class="nav-foot">下载包管家 V3.2<br>程序不会运行任何安装包</div>
   </nav>
   <section class="settings-body">
    <div class="pane" data-pane="model">
     <h2>模型设置</h2>
-    <p class="hint">AI 说明、智能搜索和功能问答都用这里的「默认模型」。下面已经把常见的服务商（DeepSeek、OpenAI、Claude、Kimi、GLM、通义千问、硅基流动、本地 Ollama）列好了，<b>地址和型号都按预置填好，你只要点「填 Key」把 Key 粘进去</b>：保存不会动默认；想让某个模型马上生效，就点它旁边的「设为默认」。没配 Key 时表格显示「--」，扫描、清理建议这些本地功能照常用。</p>
     <div class="model-top">
      <input id="modelSearch" class="model-search" type="search" autocomplete="off" spellcheck="false" placeholder="搜索：模型名 / 服务商 / 型号 / 地址" title="按名称、服务商、型号、接口地址过滤下面的模型；分组标题也会一起过滤" aria-label="搜索模型">
      <button type="button" id="modelAdd" title="新增一个常用模型：先在弹窗里选服务商（可搜索），再填型号和 Key，最后决定是「保存」还是「设为默认」">＋ 添加模型</button>
@@ -509,7 +508,7 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
      </ul>
      <h3>十一、设置里另外三页</h3>
      <ul>
-      <li><b>模型设置</b>（模型中心）：常见的服务商（DeepSeek、OpenAI、Claude、Kimi、GLM、通义千问、硅基流动、本地 Ollama）默认就列在下面，地址和型号已经按预置填好——你只要点它的「填 Key」，把 Key 粘进去，再选「保存」（只存这一个、默认不变）或「设置为默认」（存下最新内容并马上切换）就行。打开某个模型后只有三件事要关心：<b>测试连通</b>（用当前填写的内容真发一条很小的请求，只测、不保存也不改默认）、<b>保存</b>、<b>设置为默认</b>。名字旁的绿点＝必要字段配齐了，卡片上标着「当前默认」。要改地址、型号、名称或接口类型，点弹窗里的「高级设置」；想加预置里没有的服务商，用「＋ 添加模型」。另外两个开关也在这一页：「启动时自动分析缺少说明的项目」（默认关闭）、「扫描时用 AI 判断目录是否该展开」（默认关闭，关着扫描纯本地、不联网）；「立即 AI 分析」对缺少说明的项目跑一遍。Key 用 Windows DPAPI 加密存在本机（models.json，每个模型各存各的，界面只显示尾号），明文不落盘、不进 Git，也不会写进 localStorage。</li>
+      <li><b>模型设置</b>（模型中心）：常见的服务商（DeepSeek、OpenAI、Claude、Kimi、GLM、通义千问、硅基流动、OpenRouter、本地 Ollama）默认就列在下面，地址和型号已经按预置填好——你只要点它的「编辑」，把 Key 粘进去，再选「保存」（只存这一个、默认不变）或「设置为默认」（存下最新内容并马上切换）就行。打开某个模型后只有三件事要关心：<b>测试连通</b>（用当前填写的内容真发一条很小的请求，只测、不保存也不改默认）、<b>保存</b>、<b>设置为默认</b>。名字旁的绿点＝必要字段配齐了，卡片上标着「当前默认」。要改地址、型号、名称或接口类型，点弹窗里的「高级设置」；想加预置里没有的服务商，用「＋ 添加模型」。另外两个开关也在这一页：「启动时自动分析缺少说明的项目」（默认关闭）、「扫描时用 AI 判断目录是否该展开」（默认关闭，关着扫描纯本地、不联网）；「立即 AI 分析」对缺少说明的项目跑一遍。Key 用 Windows DPAPI 加密存在本机（models.json，每个模型各存各的，界面只显示尾号），明文不落盘、不进 Git，也不会写进 localStorage。</li>
       <li><b>忽略名单</b>：两个标签。①「搜索目录」＝扫描时会跳过的名字，点「恢复」撤销，恢复后要重新扫描才会回到列表；②「AI 分析」＝被 AI 分析跳过的那几格（你改写过的、或把「AI：…」那句删掉的），每行写着名称、理由、「你写的话」和路径，右边「让 AI 重新分析」只对这一个再问一次 AI，新的「AI：…」加在你的话下面、你写的字一个不动。两个标签上都带数量。</li>
       <li><b>外观与主题</b>：跟随系统 / 浅色 / 深色三选一；右上角的 ☾ / ☀ 按钮可以快速切换，选择会被记住。</li>
      </ul>
@@ -531,7 +530,7 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
      <ul>
       <li><b>在哪问</b>：两个地方都能问——① 窗口标题栏中间那个「自动问答」框，问一句按 <b>Enter</b>，答案直接弹出来；② 就是这一页顶上的输入框，按 <b>Enter</b>（或点「提问」），答案显示在下面。</li>
       <li><b>它凭什么答</b>：把这一整页「功能说明」和 README 的全文（约 1.4 万字）一次性放进提示里发给 DeepSeek，让它只按这份资料回答——没有向量库、没有索引文件、不用额外安装或部署任何东西，装着就能用。资料里没写的，它会直说「功能说明里没写」，不会瞎编。</li>
-      <li><b>要不要 Key</b>：要。没配 LLM KEY 时输入框是锁定状态，悬停会提示先去「设置 → 模型设置」填 Key，点「提问」也不会发请求。</li>
+      <li><b>要不要 Key</b>：要。没配 LLM KEY 时输入框是锁定状态，悬停会提示先去「设置 → 模型设置」把 Key 填好，点「提问」也不会发请求。</li>
       <li><b>花多少钱</b>：每次提问大约一万多个 token 的输入。按 deepseek-flash 现价（高峰输入 $0.3 / 百万 token）算，一次约 0.02 元；同一份资料命中缓存后近乎免费。答案下面会写明这次实际用掉的 token 与耗时。</li>
       <li><b>它不做什么</b>：不改你的文件、不扫盘、不读你的下载包清单，只回答软件怎么用。要按内容找包，用标题行那个「自动问答」或工具栏的「智能搜索」。</li>
      </ul>
@@ -554,7 +553,6 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
    <h2 id="modelTitle">模型</h2>
    <button type="button" id="modelClose" class="dialog-x" title="关闭这个窗口，不保存这次的改动" aria-label="关闭">&#10005;</button>
   </div>
-  <p class="hint">只需要填 API Key：服务商、型号、接口地址都已经按预置填好了，要改就点下面的「高级设置」。「保存」只存这一个模型、默认模型不变；「设置为默认」存下这里最新的内容，并马上切换成默认。</p>
   <div class="model-summary" id="mSummary" aria-live="polite"></div>
   <div class="field">
    <label for="mKey">API Key</label>
@@ -570,7 +568,6 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
     <button type="button" id="mVerify" title="用这里填的内容（含还没保存的改动）真发一次很小的请求；只测试，不保存、不改默认">测试连通</button>
     <small id="mVerifyResult" class="muted model-verify" aria-live="polite"></small>
    </div>
-   <small class="muted">测试结果只显示在这个窗口里；某个模型测试失败不影响别的模型，也不会把这份草稿存下来。</small>
   </div>
   <details class="model-opts" id="mAdvanced">
    <summary>高级设置（一般不用改）</summary>
@@ -586,17 +583,14 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
     <label for="mModel">模型型号</label>
     <input id="mModel" list="mModelOptions" autocomplete="off" spellcheck="false" placeholder="例如 deepseek-flash">
     <datalist id="mModelOptions"></datalist>
-    <small class="muted">可以从预置型号里挑，也可以直接改成服务商支持的任意型号；改过的型号原样保存，升级不会被预置值覆盖。</small>
    </div>
    <div class="field">
     <label for="mBaseUrl">接口地址（Base URL）</label>
     <input id="mBaseUrl" autocomplete="off" spellcheck="false" placeholder="https://api.deepseek.com">
-    <small class="muted">只写服务商给的地址前缀，程序会按接口类型补上 /chat/completions、/responses 或 /messages。</small>
    </div>
    <div class="field">
     <label for="mClientType">接口类型</label>
     <select id="mClientType"></select>
-    <small class="muted" id="mClientTypeHint"></small>
    </div>
   </details>
   <div class="dialog-actions">
@@ -654,6 +648,6 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="ctxMenu" class="ctx-menu"></div>
-<script src="app.js?v=20260820-42"></script>
+<script src="app.js?v=20260820-44"></script>
 </body>
 </html>

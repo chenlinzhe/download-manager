@@ -1020,17 +1020,17 @@ async function loadModels(){
  if(dd)bits.push('当前默认：'+(dd.name||dd.model||'')+(dd.configured?'':'（还没配齐，AI 功能不可用）'));
  let savedCount=(modelState.profiles||[]).length,pending=(modelState.suggested||[]).length;
  if(savedCount>1)bits.push('已保存 '+savedCount+' 个模型');
- if(pending)bits.push('另有 '+pending+' 个常见服务商没配 Key：点它的「填 Key」，粘进去就行');
+ if(pending)bits.push('另有 '+pending+' 个常见服务商还没配 Key：点「编辑」粘一把就行');
  setModelStatus(bits.join('　·　'),(dd&&!dd.configured)?'err':'')
 }
 function modelCardHtml(p){
  if(p.preset){
   let meta=[clientTypeName(p.clientType),p.model,p.baseUrl].filter(Boolean);
   return '<div class="model-card preset" data-provider="'+esc(p.providerId)+'">'
-   +'<div class="model-main"><div class="model-name"><span class="model-dot" title="还没有 API Key：点右边的「填 Key」"></span>'
+   +'<div class="model-main"><div class="model-name"><span class="model-dot" title="还没有 API Key：点右边的「编辑」"></span>'
    +'<span class="nm" title="'+esc(p.name)+'">'+esc(p.name)+'</span><span class="model-badge mute">未配置</span></div>'
    +'<div class="model-meta">'+esc(meta.join(' · '))+'</div></div>'
-   +'<div class="model-acts"><button type="button" class="mini" data-model-fill="'+esc(p.providerId)+'" title="填一把 '+esc(p.providerName)+' 的 API Key 就能用：地址和型号已经按预置填好，不用自己填">填 Key</button></div></div>'
+   +'<div class="model-acts"><button type="button" class="mini" data-model-fill="'+esc(p.providerId)+'" title="打开 '+esc(p.providerName)+'：粘一把 API Key 就能用">编辑</button></div></div>'
  }
  let ok=!!p.configured;
  let dotTitle=ok?'必要字段都齐了（服务商、接口地址、型号、Key）':('还没配齐：'+(p.hasKey?'接口地址或型号没填':'还没有 API Key'));
@@ -1070,9 +1070,8 @@ function renderModelList(){
   let rows=shown.filter(p=>p.providerId===pid);
   if(!rows.length)return;
   rows.sort((a,b)=>((b.isDefault?1:0)-(a.isDefault?1:0))||((a.preset?1:0)-(b.preset?1:0)));
-  html+='<div class="model-group" data-provider="'+esc(pid)+'">'
-   +'<div class="model-group-head">'+esc(providerName(pid))+'<span class="model-badge mute">'+rows.length+'</span></div>'
-   +rows.map(modelCardHtml).join('')+'</div>'
+  let head=rows.length>1?('<div class="model-group-head">'+esc(providerName(pid))+'<span class="model-badge mute">'+rows.length+'</span></div>'):'';
+  html+='<div class="model-group" data-provider="'+esc(pid)+'">'+head+rows.map(modelCardHtml).join('')+'</div>'
  });
  list.innerHTML=html;
  list.querySelectorAll('[data-model-edit]').forEach(b=>b.onclick=()=>openModelModal(b.dataset.modelEdit,''));
@@ -1117,10 +1116,10 @@ function syncModelSummary(){
 function syncKeyState(){
  let box=el('mKeyState'); if(!box)return;
  if(modelDraft&&modelDraft.hasKey){
-  let src=modelDraft.keySource==='env'?'（来自本机环境变量 DEEPSEEK_API_KEY）':(modelDraft.keySource==='file'?'（来自本机加密备份）':'');
-  box.textContent='已保存：'+(modelDraft.keyMasked||'')+src+'　留空＝不改这把；想换就直接粘新的进来'
+  let src=modelDraft.keySource==='env'?'（本机环境变量）':(modelDraft.keySource==='file'?'（本机备份）':'');
+  box.textContent='已保存 '+(modelDraft.keyMasked||'')+src+'　留空＝不改'
  }else{
-  box.textContent='这个模型还没有 Key：填一把再保存（Key 加密存本机，界面只显示尾号）'
+  box.textContent='还没有 Key'
  }
 }
 function blankProfile(id,pid){
@@ -1145,7 +1144,7 @@ async function openModelModal(id,providerId){
    clientType:p.clientType,hasKey:!!p.hasKey,keyMasked:p.keyMasked||'',keySource:p.keySource||'',isDefault:!!p.isDefault}
  }
  let advNeeded=isNew&&(!providerId||providerId==='custom');
- el('modelTitle').textContent=isNew?(advNeeded?'添加模型':('填 API Key · '+providerName(modelDraft.providerId))):('编辑模型 · '+(p.name||''));
+ el('modelTitle').textContent=isNew?(advNeeded?'添加模型':('编辑 · '+providerName(modelDraft.providerId))):('编辑 · '+(p.name||''));
  if(el('mAdvanced'))el('mAdvanced').open=advNeeded;
  el('mName').value=modelDraft.name||suggestModelName(modelDraft.providerId,modelDraft.model);
  if(modelDraft.providerId)el('mProvider').value=modelDraft.providerId;
