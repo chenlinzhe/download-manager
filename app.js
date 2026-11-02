@@ -69,10 +69,14 @@ function renderTags(){
 }
 /* 标签们的外框：所有标签共用一个圆角框，新建与改名的输入框也放进去 */
 function tagTabs(){let bar=el('tagBar');return bar?bar.querySelector('.tag-tabs'):null}
+let scanRunning=false,scanProgressText='',scanPollTimer=null;
 function renderScanBar(){
  let bar=el('scanBar');if(!bar||!scanInfo)return;
  let g=groupOf(activeGroup),roots=(g&&g.roots)||[],errs=scanInfo.errs||[];
- bar.textContent=(scanInfo.force?'已重新扫描 · ':'')+'「'+activeGroupName()+'」'+roots.length+' 个目录 · 更新于 '+String(scanInfo.generatedAt||'').replace('T',' ')+(scanInfo.reused?'（复用最近扫描结果，点“重新扫描”立即刷新）':'')+(errs.length?(' · '+errs.length+' 处读取失败（悬停查看）'):'');
+ let tail=scanRunning?(' · 后台扫描中'+(scanProgressText?(' · '+scanProgressText):'')+'（不影响你继续用，扫完自动更新）'):'';
+ let head=(scanInfo.force?'已重新扫描 · ':'')+'「'+activeGroupName()+'」'+roots.length+' 个目录 · ';
+ let when=scanInfo.generatedAt?('更新于 '+String(scanInfo.generatedAt).replace('T',' ')):(scanRunning?'正在第一次扫描，扫完自动出现在这里':'还没有扫描结果，点「重新扫描」开始（后台跑，不用等）');
+ bar.textContent=head+when+(errs.length?(' · '+errs.length+' 处读取失败（悬停查看）'):'')+tail;
  if(errs.length){bar.title=errs.slice(0,8).join('\n')+(errs.length>8?'\n…':'');bar.style.color='var(--warn-fg)'}
  else{bar.title='';bar.style.color=''}
 }
@@ -113,7 +117,7 @@ async function newGroup(){
   let d=await groupCall('add_group','/api/add_group',[text],{name:text});
   if(!d.ok){renderTags();return toast('新建标签失败：'+(d.error||'未知错误'),true)}
   let res=d.result||{};
-  await load(false);
+  await loadCached();
   if(res.id&&groupOf(res.id)){activeGroup=res.id;chosen.clear();naturalPaths=null;fillRootSelect();renderTags();render();refreshCounts();renderScanBar()}
   infoDone('已新建标签「'+(res.name||text)+'」，现在在目录下拉里选「＋ 新增目录（可多选）…」把目录加进来（按住 Ctrl / Shift 可一次选多个）',false);
  }
@@ -165,7 +169,7 @@ function noteCell(x){
 	let title=x.aiHidden?'双击可以改这一格（这一格已经是你的话，AI 不再单独显示）；想让 AI 重新说一遍就按住 Shift 点「AI 分析」':'双击可以改这一格，或者按 Enter；单击不会进去';
 	return '<td class="llm" tabindex="0" data-path="'+esc(x.path)+'" title="'+esc(title)+'">'+aiBox(x)+'</td>'
 }
-function render(){let v=visible();el('body').innerHTML=v.length?v.map(x=>'<tr data-path="'+esc(x.path)+'"><td><input class="pick" type="checkbox" data-id="'+esc(x.id)+'" '+(chosen.has(x.id)?'checked':'')+'></td><td><div class="name">'+esc(x.displayName||x.name)+(x.isNew?' <span class="new">新增</span>':'')+'</div><button class="path open-path" data-path="'+esc(x.parentPath||x.path)+'" title="打开包所在目录">所在目录：'+esc(x.parentPath||x.path)+'</button><div class="muted">'+esc(x.kind)+' · '+x.files+' 文件</div></td>'+noteCell(x)+'<td><span class="badge '+cls(x.recommendation)+'">'+x.recommendation+(x.manualKeep?'<button class="badge-x" data-unkeep="'+esc(x.path)+'" title="取消保留（按实际情况重新评估）">✕</button>':'')+'</span></td><td><b>'+x.score+'</b></td><td>'+fmt(x.size)+'</td><td>'+esc(x.modified.slice(0,10))+'<div class="muted">'+x.ageDays+' 天前</div></td><td>'+esc(x.redownload)+'</td><td class="'+(x.suspicious?'warn':'')+'">'+esc(x.registration)+'</td><td class="why">'+x.reasons.map(esc).join('；')+'</td></tr>').join(''):'<tr><td colspan="10" class="empty">没有符合筛选条件的项目</td></tr>';document.querySelectorAll('.open-path').forEach(e=>e.onclick=async()=>{let d=await native().open_path(e.dataset.path);if(!d.ok)alert(d.error)});document.querySelectorAll('button.badge-x').forEach(b=>b.onclick=e=>{e.stopPropagation();unkeepRows([b.dataset.unkeep])});document.querySelectorAll('td.llm').forEach(td=>{td.ondblclick=()=>editNote(td);td.onkeydown=e=>{if(e.target&&e.target.tagName==='TEXTAREA')return;if(e.key==='Enter'||e.key==='F2'){e.preventDefault();editNote(td)}}});document.querySelectorAll('.pick').forEach(e=>e.onchange=()=>{e.checked?chosen.add(e.dataset.id):chosen.delete(e.dataset.id);update()});update()}function selectedItems(){return items.filter(x=>chosen.has(x.id))}
+function render(){let v=visible();el('body').innerHTML=v.length?v.map(x=>'<tr data-path="'+esc(x.path)+'"><td><input class="pick" type="checkbox" data-id="'+esc(x.id)+'" '+(chosen.has(x.id)?'checked':'')+'></td><td><div class="name">'+esc(x.displayName||x.name)+(x.isNew?' <span class="new">新增</span>':'')+'</div><button class="path open-path" data-path="'+esc(x.parentPath||x.path)+'" title="打开包所在目录">所在目录：'+esc(x.parentPath||x.path)+'</button><div class="muted">'+esc(x.kind)+' · '+x.files+' 文件</div></td>'+noteCell(x)+'<td><span class="badge '+cls(x.recommendation)+'">'+x.recommendation+(x.manualKeep?'<button class="badge-x" data-unkeep="'+esc(x.path)+'" title="取消保留（按实际情况重新评估）">✕</button>':'')+'</span></td><td><b>'+x.score+'</b></td><td>'+fmt(x.size)+'</td><td>'+esc(x.modified.slice(0,10))+'<div class="muted">'+x.ageDays+' 天前</div></td><td>'+esc(x.redownload)+'</td><td class="'+(x.suspicious?'warn':'')+'">'+esc(x.registration)+'</td><td class="why">'+x.reasons.map(esc).join('；')+'</td></tr>').join(''):'<tr><td colspan="10" class="empty">'+(items.length?'没有符合筛选条件的项目':'还没有扫描结果：首次使用会在后台自动扫描，扫完自动出现在这里（现在就能操作，不用等）')+'</td></tr>';document.querySelectorAll('.open-path').forEach(e=>e.onclick=async()=>{let d=await native().open_path(e.dataset.path);if(!d.ok)alert(d.error)});document.querySelectorAll('button.badge-x').forEach(b=>b.onclick=e=>{e.stopPropagation();unkeepRows([b.dataset.unkeep])});document.querySelectorAll('td.llm').forEach(td=>{td.ondblclick=()=>editNote(td);td.onkeydown=e=>{if(e.target&&e.target.tagName==='TEXTAREA')return;if(e.key==='Enter'||e.key==='F2'){e.preventDefault();editNote(td)}}});document.querySelectorAll('.pick').forEach(e=>e.onchange=()=>{e.checked?chosen.add(e.dataset.id):chosen.delete(e.dataset.id);update()});update()}function selectedItems(){return items.filter(x=>chosen.has(x.id))}
 function selectedPaths(){return selectedItems().map(x=>x.path)}
 function update(){
  let n=chosen.size,picked=selectedItems();
@@ -181,36 +185,77 @@ function update(){
  move.title=!n?'先在左侧勾选项目，再点这里转移':('把勾选的 '+n+' 项转移到你选定的目录（不删除文件，同名不覆盖）');
  del.title=!n?'先在左侧勾选项目，再点这里移到回收站':('把勾选的 '+n+' 项移到 Windows 回收站（还能从回收站还原）');
 }
-async function load(force){
- infoBusy(force?'正在重新扫描全部目录…':'正在加载扫描结果…');
- el('scanBar').textContent=force?'正在全盘重新扫描…':'正在加载扫描结果…';el('scanBar').title='';el('scanBar').style.color='';
- let rs=el('rescan');if(rs){rs.disabled=true;rs.textContent='扫描中…'}
- let api=native(),timer=null;
- if(api&&typeof api.scan_status==='function'){timer=setInterval(async()=>{try{let s=await api.scan_status();if(s&&s.phase)el('scanBar').textContent=s.total?('正在'+s.phase+' '+s.done+' / '+s.total+'，请稍候…'):('正在'+s.phase+'…')}catch(_){}},400)}
+/* V3.4：打开软件先把上次的扫描结果显示出来，扫描统一丢到后台跑——
+   窗口永远马上能用，扫完列表自己更新，不会再「卡在加载扫描结果」。 */
+function applyScanData(d,force,quiet){
+ if(!d||d.error)throw Error((d&&d.error)||'扫描结果无效');
+ let keep=new Set(chosen);
+ items=Array.isArray(d.items)?d.items:[];
+ chosen=new Set([...keep].filter(id=>items.some(x=>x.id===id)));
+ scanGroups=(d.groups||[]).slice();
+ if(!scanGroups.length)scanGroups=[{id:'download',name:'下载包',roots:d.roots||[],count:items.length,builtin:true}];
+ if(!groupOf(activeGroup))activeGroup=scanGroups[0].id;
+ scanInfo={generatedAt:d.generatedAt,force:!!force,reused:!!d.reused,errs:d.errors||[]};
+ let scroller=document.scrollingElement||document.documentElement,top=scroller?scroller.scrollTop:0;
+ refreshCounts();fillRootSelect();renderTags();renderScanBar();render();
+ if(quiet&&scroller)scroller.scrollTop=top;
+ return items;
+}
+async function fetchCached(){
+ let api=native();
+ if(api&&typeof api.scan_cached==='function')return await api.scan_cached();
+ return await (await fetch('/api/snapshot')).json();
+}
+async function loadCached(){
+ try{let d=await fetchCached();applyScanData(d,false,true);return d}catch(e){return null}
+}
+async function load(force){await loadCached();startScanInBackground(force);return null}
+async function startScanInBackground(force){
+ let api=native(),rs=el('rescan');
+ /* 先把界面切到「后台扫描中」，不用等接口返回，用户点完立刻有反馈 */
+ scanRunning=true;scanProgressText='';renderScanBar();
+ if(rs){rs.disabled=true;rs.textContent='扫描中…'}
  try{
-  let d=api?await api.scan(!!force):await (await fetch('/api/scan'+(force?'?force=1':''))).json();
-  if(d.error)throw Error(d.error);
-  items=d.items;chosen.clear();
-  scanGroups=(d.groups||[]).slice();
-  if(!scanGroups.length)scanGroups=[{id:'download',name:'下载包',roots:d.roots||[],count:items.length,builtin:true}];
-  if(!groupOf(activeGroup))activeGroup=scanGroups[0].id;
-  scanInfo={generatedAt:d.generatedAt,force:!!force,reused:!!d.reused,errs:d.errors||[]};
-  refreshCounts();
-  fillRootSelect();
-  renderScanBar();
-  render();
-  renderTags();
-  infoDone((force?'重新扫描完成：「':'扫描完成：「')+activeGroupName()+'」'+groupItems().length+' 项'+(d.reused?'（复用最近扫描结果）':''),false);
-  if(api){
-   let cfg=await api.get_settings();
-   applySettingsState(cfg&&cfg.ok?cfg.result:null);
-   if(cfg&&cfg.ok&&cfg.result&&cfg.result.destination)lastDestination=cfg.result.destination;
-   let missing=items.filter(x=>!x.aiDescription&&!String(x.note||'').trim()&&(force?x.isNew:true)).map(x=>x.path);
-   if(cfg&&cfg.ok&&cfg.result.autoAnalyze&&cfg.result.apiKeyMasked&&missing.length)enrich(missing,true)
-  }
+  if(api&&typeof api.scan_start==='function')await api.scan_start(!!force);
+  else await fetch('/api/scan_start'+(force?'?force=1':''));
  }catch(e){
-  el('scanBar').textContent='加载失败';el('body').innerHTML='<tr><td colspan="10" class="empty">'+esc(e.message)+'</td></tr>'
- }finally{if(timer)clearInterval(timer);if(rs){rs.disabled=false;rs.textContent='重新扫描'}}
+  scanRunning=false;scanProgressText='';renderScanBar();
+  if(rs){rs.disabled=false;rs.textContent='重新扫描'}
+  infoDone('扫描没能启动：'+((e&&e.message)||e),true);return
+ }
+ pollScanStatus();
+}
+async function pollScanStatus(){
+ let api=native(),s=null;
+ try{
+  if(api&&typeof api.scan_status==='function')s=await api.scan_status();
+  else s=await (await fetch('/api/scan_status')).json();
+ }catch(_){s=null}
+ if(s&&s.running){
+  scanRunning=true;
+  scanProgressText=s.phase?(s.total?('正在'+s.phase+' '+s.done+' / '+s.total):('正在'+s.phase)):'';
+  renderScanBar();
+  if(!scanPollTimer)scanPollTimer=setInterval(pollScanStatus,800);
+  return;
+ }
+ if(scanPollTimer){clearInterval(scanPollTimer);scanPollTimer=null}
+ let rs=el('rescan');if(rs){rs.disabled=false;rs.textContent='重新扫描'}
+ scanRunning=false;scanProgressText='';
+ if(s&&s.error){renderScanBar();el('scanBar').style.color='var(--warn-fg)';infoDone('扫描失败：'+s.error,true);return}
+ await loadCached();
+ renderScanBar();el('scanBar').style.color='';
+ infoDone('「'+activeGroupName()+'」扫描完成：'+groupItems().length+' 项（后台扫完，列表已自动更新）',false);
+ await afterDataRefresh();
+}
+async function afterDataRefresh(){
+ let api=native();if(!api)return;
+ try{
+  let cfg=await api.get_settings();
+  applySettingsState(cfg&&cfg.ok?cfg.result:null);
+  if(cfg&&cfg.ok&&cfg.result&&cfg.result.destination)lastDestination=cfg.result.destination;
+  let missing=items.filter(x=>!x.aiDescription&&!String(x.note||'').trim()).map(x=>x.path);
+  if(cfg&&cfg.ok&&cfg.result&&cfg.result.autoAnalyze&&cfg.result.apiKeyMasked&&missing.length)enrich(missing,true)
+ }catch(_){}
 }
 
 async function postAction(url,payload){
@@ -489,9 +534,8 @@ async function smartSearch(){
  else if(added.length>1)msg='已把 '+added.length+' 个目录加进「'+activeGroupName()+'」：'+added.slice(0,3).join('、')+(added.length>3?' 等 '+added.length+' 个':'');
  if(skipped.length)msg+=(msg?'；':'')+'跳过 '+skipped.length+' 个（'+skipped.slice(0,2).map(x=>x.reason||'').join('、')+'）';
  if(failed.length)msg+=(msg?'；':'')+failed.length+' 个没加成（'+failed.slice(0,2).map(x=>x.reason||x.error||'').join('、')+'）';
- infoBusy(msg+'，正在扫描新目录…');
- await load(true);
- infoDone(msg+'；扫描完成：「'+activeGroupName()+'」'+groupItems().length+' 项',failed.length>0)
+ infoDone(msg+'；新目录已加入，正在后台扫描（不影响你继续操作，扫完列表自动更新）',failed.length>0);
+ startScanInBackground(true)
 }
 let settingsPane='model';
 async function openSettings(pane){
@@ -573,7 +617,7 @@ async function action(type){
  }catch(e){toast('操作失败：'+e.message,true)}
  finally{update()}
 }
-document.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>setSort(th.dataset.sort));el('settingsBtn').onclick=()=>openSettings(settingsPane||'model');el('smartSearch').onclick=smartSearch;el('settingsAnalyze').onclick=analyzeNow;el('q').oninput=()=>{searchVersion++;naturalPaths=null;el('searchStatus').textContent='';el('smartSearch').disabled=false;el('smartSearch').classList.remove('searching');el('smartSearch').textContent='智能搜索';render()};el('q').onkeydown=e=>{if(e.key==='Enter')smartSearch()};el('filter').onchange=render;el('onlyNew').onchange=render;el('root').onchange=()=>{if(el('root').value==='__add__'){el('root').value='';addRoot()}else render()};el('rescan').onclick=()=>load(true);el('keep').onclick=()=>action('keep');el('move').onclick=()=>openMoveDialog(selectedPaths());el('del').onclick=()=>action('delete');el('all').onchange=e=>{visible().forEach(x=>e.target.checked?chosen.add(x.id):chosen.delete(x.id));render()};
+document.querySelectorAll('th.sortable').forEach(th=>th.onclick=()=>setSort(th.dataset.sort));el('settingsBtn').onclick=()=>openSettings(settingsPane||'model');el('smartSearch').onclick=smartSearch;el('settingsAnalyze').onclick=analyzeNow;el('q').oninput=()=>{searchVersion++;naturalPaths=null;el('searchStatus').textContent='';el('smartSearch').disabled=false;el('smartSearch').classList.remove('searching');el('smartSearch').textContent='智能搜索';render()};el('q').onkeydown=e=>{if(e.key==='Enter')smartSearch()};el('filter').onchange=render;el('onlyNew').onchange=render;el('root').onchange=()=>{if(el('root').value==='__add__'){el('root').value='';addRoot()}else render()};el('rescan').onclick=()=>startScanInBackground(true);el('keep').onclick=()=>action('keep');el('move').onclick=()=>openMoveDialog(selectedPaths());el('del').onclick=()=>action('delete');el('all').onchange=e=>{visible().forEach(x=>e.target.checked?chosen.add(x.id):chosen.delete(x.id));render()};
 el('noticeClose').onclick=async()=>{
 	hideNotice=true;syncNotice();
 	if(el('showNotice'))el('showNotice').checked=false;
@@ -594,7 +638,20 @@ el('kbQ').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();askKb()}else if(e
 el('kbQ').onfocus=()=>{if(!llmReady)toast('要使用功能问答，请先到「设置 → 模型设置」中配置 LLM KEY',true)};
 syncKb();
 syncQa();
-let started=false;async function startWhenReady(){if(started)return;let api=native();if(api&&typeof api.scan==='function'&&typeof api.enrich==='function'){started=true;el('status').textContent='原生接口已连接';try{let v=await api.app_version();if(v&&v.ok&&v.result)el('ver').textContent='V'+v.result}catch(_){}try{let gl=await api.group_list();if(gl&&gl.ok&&Array.isArray(gl.result)&&gl.result.length){scanGroups=gl.result.slice();if(!groupOf(activeGroup))activeGroup=scanGroups[0].id;renderTags();fillRootSelect();refreshCounts()}}catch(_){}await load(false);return}el('status').textContent='正在连接本机分析接口…';setTimeout(startWhenReady,200)}window.addEventListener('pywebviewready',startWhenReady);startWhenReady();
+let started=false;async function startWhenReady(){
+ if(started)return;
+ let api=native(),browser=/^https?:/i.test(location.protocol);
+ if(!browser&&(!api||typeof api.scan_cached!=='function')){el('status').textContent='正在连接本机分析接口…';setTimeout(startWhenReady,200);return}
+ started=true;el('status').textContent='原生接口已连接';
+ if(api){
+  try{let v=await api.app_version();if(v&&v.ok&&v.result)el('ver').textContent='V'+v.result}catch(_){}
+  try{let gl=await api.group_list();if(gl&&gl.ok&&Array.isArray(gl.result)&&gl.result.length){scanGroups=gl.result.slice();if(!groupOf(activeGroup))activeGroup=scanGroups[0].id;renderTags();fillRootSelect();refreshCounts()}}catch(_){}
+ }
+ await loadCached();
+ await afterDataRefresh();
+ startScanInBackground(false);
+}
+window.addEventListener('pywebviewready',startWhenReady);startWhenReady();
 
 /* V2.8：双击（或按 Enter）才进编辑。框里是你的话 + 下一行「AI：…」（那行是给你看的素材）：
    你留着它保存＝接受它的内容，保存时并入你自己的话，格子里不再有单独的 AI 那一行；

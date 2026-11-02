@@ -19,7 +19,7 @@ class TempApp(unittest.TestCase):
         for name in ('SETTINGS_FILE', 'LABELS_FILE', 'SNAPSHOT_FILE', 'INVENTORY_FILE',
                      'AI_CACHE_FILE', 'COLLECTION_CACHE_FILE', 'COLLECTION_FAIL_FILE',
                      'MANUAL_ROOTS_FILE', 'NOTES_FILE', 'IGNORE_FILE', 'GROUPS_FILE',
-                     'AI_HIDDEN_FILE', 'MODELS_FILE'):
+                     'AI_HIDDEN_FILE', 'MODELS_FILE', 'SUMMARY_CACHE_FILE'):
             self._saved[name] = getattr(server, name)
             setattr(server, name, self.dir / (name.lower() + '.json'))
         self._roots = server.roots
@@ -1507,6 +1507,120 @@ class TestScanCache(TempApp):
         self.assertEqual(self.names(data), ['alpha', 'gamma'],
                          u'上一次扫描还没跑完时再点「重新扫描」，必须等它结束并给出真正的新结果')
         self.assertEqual(server.scan_status().get('phase'), '', u'结束后进度要清空')
+
+
+class TestBackgroundScan(TempApp):
+    """V3.4：打开软件不许卡在扫描上——先给上次结果，扫描在后台线程里跑。"""
+
+    def setUp(self):
+        super().setUp()
+        self.root = self.dir / 'rootA'
+        (self.root / 'alpha').mkdir(parents=True)
+        (self.root / 'alpha' / 'a.zip').write_bytes(b'x')
+        (self.root / 'beta').mkdir(parents=True)
+        (self.root / 'beta' / 'b.zip').write_bytes(b'x')
+        self._classify = server.classify_first_level
+        server.classify_first_level = lambda children: {}
+        self._cache = server.CACHE
+        server.CACHE = {}
+        self.group = server.add_group(u'我的项目')
+        server.add_manual_roots([str(self.root)], self.group['id'])
+
+    def tearDown(self):
+        server.classify_first_level = self._classify
+        server.CACHE = self._cache
+        server.SCAN_LOCK.acquire(False) and server.SCAN_LOCK.release()
+        server.SCAN_STATE.update(running=False, error='')
+        super().tearDown()
+
+    def test_cached_snapshot_returns_without_scanning(self):
+        server.scan(True)
+        before = dict(server.PROGRESS)
+        data = server.cached_snapshot()
+        self.assertEqual(sorted(x['name'] for x in data['items']), ['alpha', 'beta'])
+        self.assertTrue(data.get('cached'))
+        self.assertIsInstance(data.get('ageSeconds'), int)
+        self.assertEqual(dict(server.PROGRESS), before, u'读快照不许触发扫描，也不许显示扫描进度')
+
+    def test_cached_snapshot_is_empty_on_first_run(self):
+        data = server.cached_snapshot()
+        self.assertEqual(data['items'], [])
+        self.assertTrue(data.get('empty'))
+        self.assertFalse(data.get('cached'))
+
+    def test_scan_async_returns_at_once_and_finishes_in_background(self):
+        out = server.scan_async(False)
+        self.assertTrue(out.get('started'))
+        deadline = time.time() + 20
+        while time.time() < deadline and server.scan_status().get('running'):
+            time.sleep(0.05)
+        status = server.scan_status()
+        self.assertFalse(status.get('running'), u'后台扫描应该在后台跑完，并把自己标成不在跑')
+        self.assertGreaterEqual(status.get('generation') or 0, 1)
+        self.assertEqual(sorted(x['name'] for x in server.cached_snapshot()['items']), ['alpha', 'beta'])
+
+    def test_second_async_call_does_not_start_a_parallel_scan(self):
+        hold = threading.Event()
+        release = threading.Event()
+        original = server._scan_impl
+
+        def slow(force=False):
+            hold.set()
+            release.wait(15)
+            return original(force)
+
+        server._scan_impl = slow
+        try:
+            first = server.scan_async(True)
+            self.assertTrue(first.get('started'))
+            self.assertTrue(hold.wait(5))
+            second = server.scan_async(True)
+            self.assertFalse(second.get('started'), u'已经在扫的时候不许再开一个')
+            self.assertTrue(second.get('running'))
+        finally:
+            release.set()
+            server._scan_impl = original
+        deadline = time.time() + 20
+        while time.time() < deadline and server.scan_status().get('running'):
+            time.sleep(0.05)
+        self.assertFalse(server.scan_status().get('running'))
+
+
+class TestSummaryCache(unittest.TestCase):
+    """重复扫描几乎瞬时的前提：目录没变就沿用上次的统计。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_unchanged_folder_is_taken_from_cache(self):
+        pkg = self.dir / 'pkg'
+        pkg.mkdir()
+        (pkg / 'a.bin').write_bytes(b'x' * 10)
+        (pkg / 'b.bin').write_bytes(b'y' * 20)
+        cache = {}
+        size, files = server.summary(pkg, cache)[:2]
+        self.assertEqual((size, files), (30, 2))
+        self.assertIn(str(pkg).lower(), cache)
+        (pkg / 'c.bin').write_bytes(b'z' * 5)          # 目录内容变了，修改时间跟着变
+        size2, files2 = server.summary(pkg, cache)[:2]
+        self.assertEqual((size2, files2), (35, 3), u'目录变了就必须重新统计')
+
+    def test_cache_hit_skips_the_walk(self):
+        pkg = self.dir / 'pkg'
+        pkg.mkdir()
+        (pkg / 'a.bin').write_bytes(b'x' * 10)
+        cache = {}
+        server.summary(pkg, cache)
+        import time as _t
+        _t.sleep(0.01)
+        started = _t.time()
+        out = server.summary(pkg, cache)
+        self.assertEqual(out[0], 10)
+        self.assertLess(_t.time() - started, 0.5)
 
 
 class TestScanAiSwitch(TempApp):

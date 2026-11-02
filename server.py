@@ -10,9 +10,10 @@ if getattr(__import__('sys'),'frozen',False):
 LABELS_FILE=APP/'user_labels.json'
 SETTINGS_FILE=APP/'settings.json'; AI_CACHE_FILE=APP/'ai_descriptions.json'; INVENTORY_FILE=APP/'inventory.json'; COLLECTION_CACHE_FILE=APP/'collection_classifications.json'; MANUAL_ROOTS_FILE=APP/'manual_roots.json'; SNAPSHOT_FILE=APP/'inventory_snapshot.json'; COLLECTION_FAIL_FILE=APP/'collection_failures.json'; NOTES_FILE=APP/'user_notes.json'; IGNORE_FILE=APP/'ignore.json'; SCAN_TTL_DAYS=7
 GROUPS_FILE=APP/'resource_groups.json'
+SUMMARY_CACHE_FILE=APP/'summary_cache.json'
 AI_HIDDEN_FILE=APP/'ai_hidden.json'
 MODELS_FILE=APP/'models.json'
-APP_VERSION='3.3'
+APP_VERSION='3.4'
 ENV_KEY_NAME='DEEPSEEK_API_KEY'
 DEFAULT_MODEL='deepseek-flash'
 MODEL_ALIASES={'deepseek-v4-flash':'deepseek-flash','deepseek-v4':'deepseek-flash'}  # 只纠正本应用自己用过的失效模型名
@@ -21,7 +22,12 @@ SCAN_LOCK=threading.Lock()
 PROGRESS={'phase':'','done':0,'total':0,'at':0.0}
 def set_progress(phase,done=0,total=0):
  PROGRESS.update(phase=phase,done=done,total=total,at=time.time())
-def scan_status(): return dict(PROGRESS)
+SCAN_STATE={'running':False,'force':False,'startedAt':0.0,'finishedAt':0.0,'generation':0,'error':''}
+def scan_status():
+ out=dict(PROGRESS)
+ out.update(running=SCAN_STATE['running'],force=SCAN_STATE['force'],startedAt=SCAN_STATE['startedAt'],
+            finishedAt=SCAN_STATE['finishedAt'],generation=SCAN_STATE['generation'],error=SCAN_STATE['error'])
+ return out
 def scan_ai_enabled():
  """扫描时是否让 AI 判断「一级目录是不是多个包的集合」。默认关闭：扫描纯本地、不联网、不花钱。"""
  try: return bool(load_json_file(SETTINGS_FILE,{}).get('scanAI'))
@@ -394,14 +400,20 @@ WALK_SKIP=frozenset('''node_modules __pycache__ .git .svn .hg .venv venv .tox .m
 .turbo .svelte-kit .angular bower_components jspm_packages .eggs .bundle .cargo .npm .nuget'''.split())
 HINT_RE=re.compile(r'crack|keygen|注册机|破解|无限试用|激活工具|serial',re.I)
 
-def summary(p):
+def summary(p,cache=None):
  """统计一个条目的大小、文件数、目录数与最新时间。用 os.scandir（比 os.walk+Path.stat 快
- 一个数量级），并跳过依赖/缓存目录；跳过目录仍计入目录数，只是不进去逐个文件数。"""
+ 一个数量级），并跳过依赖/缓存目录；跳过目录仍计入目录数，只是不进去逐个文件数。
+ cache 是上次的统计结果：目录的修改时间没变就直接沿用，重复扫描几乎瞬间完成。"""
  size=files=dirs=err=0; newest=0.0; hints=[]
  try: st=os.stat(p)
  except OSError: raise
  if not os.path.isdir(p):
   return st.st_size,1,0,st.st_mtime,[],0
+ key=str(p).lower()
+ if cache is not None:
+  hit=cache.get(key)
+  if isinstance(hit,dict) and hit.get('mtime')==st.st_mtime and isinstance(hit.get('size'),int):
+   return hit['size'],int(hit.get('files') or 0),int(hit.get('dirs') or 0),float(hit.get('newest') or st.st_mtime),list(hit.get('hints') or []),int(hit.get('err') or 0)
  stack=[p]
  while stack:
   base=stack.pop()
@@ -419,6 +431,8 @@ def summary(p):
     size+=s.st_size; files+=1
     if s.st_mtime>newest: newest=s.st_mtime
     if len(hints)<6 and HINT_RE.search(e.name): hints.append(e.name)
+ if cache is not None:
+  cache[key]={'mtime':st.st_mtime,'size':size,'files':files,'dirs':dirs,'newest':newest,'hints':hints[:6],'err':err}
  return size,files,dirs,newest,hints[:6],err
 
 def analyze(p,size,files,newest,hints):
@@ -1536,6 +1550,35 @@ def snapshot_is_current(snap):
  if not isinstance(snap,dict) or not isinstance(snap.get('items'),list): return False
  return snap.get('rootSig')==roots_signature()
 
+def cached_snapshot():
+ """只读上次的扫描结果：不扫描、不等待。窗口一打开就能先显示上次的列表。"""
+ snap=load_json_file(SNAPSHOT_FILE,None)
+ if not isinstance(snap,dict) or not isinstance(snap.get('items'),list):
+  return {'items':[],'generatedAt':'','roots':[],'errors':[],'groups':group_list(),
+          'cached':False,'empty':True,'ageSeconds':None}
+ data={'generatedAt':snap.get('generatedAt'),'items':snap['items'],'roots':snap.get('roots',[]),
+       'errors':snap.get('errors',[]),'rootSig':snap.get('rootSig')}
+ with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
+ out=_finalize(dict(data,reused=True))
+ out['cached']=True
+ try: out['ageSeconds']=max(0,int((datetime.now()-datetime.fromisoformat(snap.get('generatedAt') or '')).total_seconds()))
+ except (ValueError,TypeError): out['ageSeconds']=None
+ return out
+
+def scan_async(force=False):
+ """在后台线程里扫描，立刻返回：窗口不会被卡住，用户该干什么干什么，
+ 扫描完前端自己把列表换掉。"""
+ if SCAN_STATE['running']:
+  return {'started':False,'running':True,'generation':SCAN_STATE['generation']}
+ SCAN_STATE.update(running=True,force=bool(force),startedAt=time.time(),error='')
+ def run():
+  try: scan(force)
+  except Exception as e: SCAN_STATE['error']=str(e)
+  finally:
+   SCAN_STATE['finishedAt']=time.time(); SCAN_STATE['running']=False; SCAN_STATE['generation']+=1
+ threading.Thread(target=run,name='scan',daemon=True).start()
+ return {'started':True,'running':True,'generation':SCAN_STATE['generation']}
+
 def scan(force=False):
  if SCAN_LOCK.acquire(blocking=False):
   try: return _scan_impl(force)
@@ -1555,6 +1598,11 @@ def scan(force=False):
 
 def _scan_impl(force=False):
  gs=groups(); sig=roots_signature(gs)
+ # 上次每个目录的大小/文件数：目录修改时间没变就沿用，省掉重复的遍历（强制重扫时不沿用）
+ sum_cache={}
+ if not force:
+  cached=load_json_file(SUMMARY_CACHE_FILE,{})
+  if isinstance(cached,dict): sum_cache=cached
  if not force:
   snap=load_json_file(SNAPSHOT_FILE,None)
   if isinstance(snap,dict) and isinstance(snap.get('items'),list) and snap.get('generatedAt'):
@@ -1574,7 +1622,7 @@ def _scan_impl(force=False):
    seen_roots.add(key); rr.append((group_rows,rp))
  def add_item(p,root,collection=None,collection_reason='',media_kind='',grp=None):
   try:
-   size,files,dirs,newest,hints,errs=summary(p); newest=newest or p.stat().st_mtime
+   size,files,dirs,newest,hints,errs=summary(p,sum_cache); newest=newest or p.stat().st_mtime
    item={'id':str(p),'name':p.name,'path':str(p),'parentPath':str(p.parent),'root':str(root),'group':(grp or {}).get('id','download'),'groupName':(grp or {}).get('name','下载包'),'size':size,'files':files,'dirs':dirs,'modified':datetime.fromtimestamp(newest).isoformat(timespec='seconds'),'readErrors':errs,**analyze(p,size,files,newest,hints)}
    if media_kind:
     item.update(kind=media_kind+'目录',recommendation='建议保留',score=max(85,item['score']),mediaDirectory=True)
@@ -1613,8 +1661,25 @@ def _scan_impl(force=False):
    else:
     one=add_item(p,root,grp=grp)
     if one and decision.get('pending'): one['collectionPending']=True
+ # 扫描可能跑了几分钟，期间用户也许刚点过「标为保留 / 取消保留」：按最新标记校正一遍，
+ # 别让这次扫描把用户的操作覆盖回去。
+ final_labels=load_labels()
+ for item in out:
+  try: manual=final_labels.get(str(Path(item['path']).resolve()).lower())
+  except (OSError,ValueError): manual=None
+  if manual and manual.get('label')=='keep': item.update(_manual_keep_fields(manual))
+  elif item.get('manualKeep'):
+   try: item.update(reanalyze(item['path']))
+   except (OSError,ValueError):
+    item.pop('manualKeep',None)
  set_progress('保存扫描结果')
  save_json_file(INVENTORY_FILE,[item_fingerprint(x) for x in out])
+ if sum_cache:
+  keys=set()
+  for item in out:
+   try: keys.add(str(item['path']).lower())
+   except (KeyError,TypeError): pass
+  save_json_file(SUMMARY_CACHE_FILE,{k:v for k,v in sum_cache.items() if k in keys})
  data={'generatedAt':datetime.now().isoformat(timespec='seconds'),'items':out,'roots':[str(p) for _,p in rr],'errors':errors,'rootSig':sig,'version':APP_VERSION}
  save_json_file(SNAPSHOT_FILE,data)
  with LOCK: CACHE.clear(); CACHE.update(data,at=time.time())
@@ -1675,6 +1740,16 @@ class H(SimpleHTTPRequestHandler):
   if u.path=='/api/groups':
    try: return self.sendj({'ok':True,'result':group_list()})
    except Exception as e: return self.sendj({'ok':False,'error':str(e)},500)
+  if u.path=='/api/snapshot':
+   try: return self.sendj(cached_snapshot())
+   except Exception as e: return self.sendj({'error':str(e)},500)
+  if u.path=='/api/scan_status':
+   try: return self.sendj(scan_status())
+   except Exception as e: return self.sendj({'error':str(e)},500)
+  if u.path=='/api/scan_start':
+   force=urllib.parse.parse_qs(u.query).get('force',['0'])[0]=='1'
+   try: return self.sendj(scan_async(force))
+   except Exception as e: return self.sendj({'error':str(e)},500)
   if u.path=='/api/scan':
    force=urllib.parse.parse_qs(u.query).get('force',['0'])[0]=='1'
    try:

@@ -281,7 +281,7 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
 </head>
 <body>
 <header>
- <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V3.3</span></div>
+ <div class="brand"><span class="logo">&#128230;</span><h1>下载包管家</h1><span id="ver" class="version" title="当前版本">V3.4</span></div>
  <div class="qa-wrap"><input id="qa" class="qa-input" type="search" autocomplete="off" spellcheck="false" placeholder="自动问答：问一句，Enter 提交" title="要使用自动问答，请先到「设置」中配置 LLM KEY" aria-label="自动问答"></div>
  <div class="header-right">
   <span id="status">准备加载…</span>
@@ -290,7 +290,7 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
  </div>
 </header>
 <main>
- <div id="notice" class="notice"><span class="notice-icon">&#9432;</span><span class="notice-text">扫描分两种：平时打开软件，7 天内的结果直接复用（目录清单一旦有增删，会自动重扫一遍，不会给你旧列表）；想立刻看最新的就点「重新扫描」。扫描全程只读文件名 / 大小 / 时间，纯本地，不联网。AI 不参与扫描，只有你自己点「AI 分析」「智能搜索」时才会请求 DeepSeek。点「标为保留」＝该包永久留用，不受清理建议影响；徽章旁的小 ✕ 可以随时取消保留，也可以勾选后点工具栏的「取消保留」。表格上方那一排「资源标签」默认只有一个「下载包」（自动发现的下载目录 + 你手工加的目录）；想用来管别的资料（比如自己的项目），就点「＋ 新建标签」再建一个，功能跟「下载包」完全一样，只是目录由你自己加。右键任意一行还有 AI 分析 / 改这一格的说明 / 忽略 / 转移 / 删到回收站。程序不会运行任何安装包。</span><button type="button" id="noticeClose" class="notice-close" title="关闭这条提示，之后不再自动显示（想恢复：设置 → 外观与主题 → 勾「启动时显示顶部提示条」）" aria-label="关闭提示">&#10005;</button></div>
+ <div id="notice" class="notice"><span class="notice-icon">&#9432;</span><span class="notice-text">打开就能用，扫描全在后台：启动时先立刻显示上次的扫描结果，同时后台把目录重扫一遍（目录清单有增删也会自动发现），扫完列表自己更新，你搜索、勾选、改说明都不受影响；想立刻刷新就点「重新扫描」，同样是后台跑，点完就能继续操作。扫描全程只读文件名 / 大小 / 时间，纯本地，不联网。AI 不参与扫描，只有你自己点「AI 分析」「智能搜索」时才会请求 DeepSeek。点「标为保留」＝该包永久留用，不受清理建议影响；徽章旁的小 ✕ 可以随时取消保留，也可以勾选后点工具栏的「取消保留」。表格上方那一排「资源标签」默认只有一个「下载包」（自动发现的下载目录 + 你手工加的目录）；想用来管别的资料（比如自己的项目），就点「＋ 新建标签」再建一个，功能跟「下载包」完全一样，只是目录由你自己加。右键任意一行还有 AI 分析 / 改这一格的说明 / 忽略 / 转移 / 删到回收站。程序不会运行任何安装包。</span><button type="button" id="noticeClose" class="notice-close" title="关闭这条提示，之后不再自动显示（想恢复：设置 → 外观与主题 → 勾「启动时显示顶部提示条」）" aria-label="关闭提示">&#10005;</button></div>
  <div id="tagBar" class="tag-bar" hidden></div>
  <section class="summary">
   <div class="card"><span class="k">扫描到的项目</span><b id="count">&mdash;</b></div>
@@ -317,7 +317,7 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
     <option value="__add__">＋ 新增目录（可多选）…</option>
     <option value="" selected>全部目录</option>
    </select>
-   <button id="rescan" title="立刻重新扫描全部目录：重新读取文件、大小与注册信息（大约几十秒）">重新扫描</button>
+   <button id="rescan" title="在后台重新扫描全部目录：重新读取文件、大小与注册信息；扫描期间窗口照常可用，点完就能继续操作">重新扫描</button>
   </div>
   <div class="actions">
    <span class="info-slot">
@@ -349,7 +349,7 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
     <th>注册 / 授权情况</th>
     <th>判断依据</th>
    </tr></thead>
-   <tbody id="body"><tr><td colspan="10" class="empty">正在加载扫描结果（本地扫描，不联网；目录有增删会自动重扫）…</td></tr></tbody>
+   <tbody id="body"><tr><td colspan="10" class="empty">正在读取上次的扫描结果…（首次使用还没有结果，会在后台自动扫描；先看右上角设置里的「功能说明」也行，不用等）</td></tr></tbody>
   </table>
  </div>
 </main>
@@ -361,7 +361,7 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
    <button type="button" class="nav-item" data-pane="ignore" title="搜索目录 / AI 分析 两个标签：查看并撤销被忽略的项目，以及被 AI 分析跳过的那几格">忽略名单</button>
    <button type="button" class="nav-item" data-pane="theme" title="跟随系统 / 浅色 / 深色">外观与主题</button>
    <button type="button" class="nav-item" data-pane="guide" title="逐条说明软件里的每个功能：扫描、建议、AI 分析、批量操作、设置">功能说明</button>
-   <div class="nav-foot">下载包管家 V3.3<br>程序不会运行任何安装包</div>
+   <div class="nav-foot">下载包管家 V3.4<br>程序不会运行任何安装包</div>
   </nav>
   <section class="settings-body">
    <div class="pane" data-pane="model">
@@ -423,12 +423,12 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
        <li><b>自动找下载目录</b>：逐个磁盘（C 到 Z）看根目录下名字像下载目录的文件夹，例如 Downloads、下载、Down。</li>
        <li><b>手动加目录</b>：工具栏的目录下拉里选「＋ 新增目录（可多选）…」，可以把任意文件夹加进来（含移动硬盘、网络路径、NAS 共享目录）；选的时候按住 <b>Ctrl</b> 或 <b>Shift</b> 可以一次选好几个文件夹，一次全加进来。加过之后每次扫描都会带上。</li>
        <li><b>只展开一层</b>：下载目录里的项目直接列出；若某个文件夹被判定为「多个独立下载包的集合目录」，会把它里面的子项单独列成一行，显示为「集合名 / 子项名」。再深一层不展开，避免把安装目录里的 dll 也当成下载包。判断默认只用本地规则（同一层里有多个安装包、或明显是安装目录），拿不准的目录先当成一个整体；想让 AI 帮忙判断，勾设置里的「扫描时用 AI 判断目录是否该展开」。</li>
-       <li><b>扫描为什么这么快</b>：本地只读文件名 / 大小 / 时间，而且统计大小和文件数时会跳过 node_modules、.git、venv、__pycache__ 这类依赖与缓存目录（只按一个目录算，不进去逐个文件数）——它们动辄几十万个文件，是扫描慢的主要原因。</li>
-       <li><b>一周复用一次结果</b>：同一份扫描结果 7 天内直接复用，所以再次打开软件几乎立刻出列表。但一旦目录清单有变化（新增或删掉目录、新建或改名标签），下次加载会自动重扫，不会把旧列表当成新结果。想马上看最新的，随时点「重新扫描」。</li>
-       <li><b>重新扫描</b>：忽略缓存，重新读取每个项目的文件数、大小、修改时间、目录里是否带注册机、压缩包里有哪些文件。全程纯本地、不联网；如果上一次扫描还没跑完，再点会等它跑完再扫一遍，不会拿旧结果糊弄你。</li>
+       <li><b>扫描为什么这么快</b>：本地只读文件名 / 大小 / 时间；统计大小和文件数时会跳过 node_modules、.git、venv、__pycache__ 这类依赖与缓存目录（只按一个目录算，不进去逐个文件数）——它们动辄几十万个文件，是扫描慢的主要原因。另外每个目录上次统计过、修改时间又没变，就直接沿用上次的数（存在本机 summary_cache.json 里），所以目录没变化时再扫基本是瞬时的。</li>
+       <li><b>打开就能用，扫描全在后台</b>：窗口一打开就先把上次的扫描结果显示出来（哪怕已经过了好几天），扫描丢到后台线程里跑——你可以马上搜索、筛选、切标签、看功能说明、改设置，列表照常用，扫完自己更新，<b>不会再卡在「正在加载扫描结果」</b>。目录清单有变化（新增 / 删掉目录、新建或改名标签）时会自动重扫，也是后台做，不用你等。第一次使用还没有任何结果时，表格会写「还没有扫描结果」，同样在后台扫，扫完自动出现。</li>
+       <li><b>重新扫描</b>：忽略缓存，重新读取每个项目的文件数、大小、修改时间、目录里是否带注册机、压缩包里有哪些文件。点完立刻返回，扫描在后台跑（按钮显示「扫描中…」，扫完自己变回「重新扫描」），期间窗口照常可用。全程纯本地、不联网；如果上一次扫描还没跑完，再点会等在跑的那次结束之后再扫，不会拿旧结果糊弄你。</li>
        <li><b>散落的图片 / 视频 / 音乐</b>：单个媒体文件不算下载包，不列出来；主要由媒体组成的文件夹标成「媒体目录」，直接给「建议保留」。</li>
        <li><b>忽略名单</b>：名单里的名字（或路径）在扫描阶段就被跳过，不删除任何文件。</li>
-       <li><b>扫描进度</b>：顶部状态会显示「正在枚举扫描目录 / 统计目录内容 / 保存扫描结果」，表格上方还有一行进度；读不到的目录会汇总成「N 处读取失败」，鼠标悬停看详情。</li>
+       <li><b>扫描进度看哪里</b>：表格上方那一行会写「后台扫描中 · 正在枚举扫描目录 / 统计目录内容 / 保存扫描结果 … 5 / 16（不影响你继续用，扫完自动更新）」，鼠标悬停有说明；读不到的目录会汇总成「N 处读取失败」，悬停看详情。扫描结束时工具栏左边的信息条会写一句「扫描完成：N 项（后台扫完，列表已自动更新）」。</li>
       </ul>
       <h3>二、资源标签：第一个是「下载包」，其余自己建</h3>
       <ul>
@@ -542,7 +542,7 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
       </ul>
       <h3>十四、命令行（CLI，给 GPT / dsh 这类外部工具读数据用）</h3>
       <ul>
-       <li><b>两种调用方式</b>：源码运行 <code>python cli.py list</code>；打包好的 EXE 运行 <code>下载包管家智能搜索版-v33.exe --cli list --out out.json</code>。窗口版 EXE 没有控制台，建议一律加 <code>--out</code> 把 JSON 写进文件。</li>
+       <li><b>两种调用方式</b>：源码运行 <code>python cli.py list</code>；打包好的 EXE 运行 <code>下载包管家智能搜索版-v34.exe --cli list --out out.json</code>。窗口版 EXE 没有控制台，建议一律加 <code>--out</code> 把 JSON 写进文件。</li>
        <li><b>子命令</b>：<code>status</code>（版本 / 上次扫描时间 / 是否配置 Key）、<code>groups</code>（标签、目录、条目数）、<code>scan [--force]</code>（纯本地扫描一次）、<code>list</code>（列出条目，可加 <code>--group</code> / <code>--query</code> / <code>--recommendation</code> / <code>--sort</code> / <code>--limit</code> / <code>--offset</code> / <code>--fields</code>）、<code>search 一句话</code>（纯本地关键词召回）、<code>describe 路径</code>（看单个条目）。</li>
        <li><b>默认只读上次扫描结果</b>，秒回、不扫描；加 <code>--refresh</code> 才会先扫一遍。</li>
        <li><b>不会花钱</b>：CLI 只做本地扫描与关键词匹配，不会替你调用 DeepSeek。</li>
@@ -664,6 +664,6 @@ button.mini{padding:2px 10px;font-size:12px;font-weight:500;line-height:1.7}
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <div id="ctxMenu" class="ctx-menu"></div>
-<script src="app.js?v=20260820-44"></script>
+<script src="app.js?v=20260820-45"></script>
 </body>
 </html>

@@ -104,6 +104,14 @@ class Api:
  def scan(self, force=False):
   try: return server.scan(force)
   except Exception as e: return {'error':str(e)}
+ def scan_cached(self):
+  """V3.4：只读上次扫描结果，不扫描、不等待——打开软件立刻有列表可用。"""
+  try: return server.cached_snapshot()
+  except Exception as e: return {'ok':False,'error':str(e)}
+ def scan_start(self, force=False):
+  """V3.4：把扫描丢到后台线程里，立刻返回；前端轮询 scan_status 看进度。"""
+  try: return server.scan_async(force)
+  except Exception as e: return {'ok':False,'error':str(e)}
  def keep(self, paths):
   try: return {'ok':True,'result':server.save_keep(paths)}
   except Exception as e: return {'ok':False,'error':str(e)}
